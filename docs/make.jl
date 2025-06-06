@@ -1,14 +1,14 @@
-using MMStudio
+using ModelManagerStudio
 using Documenter
 
-DocMeta.setdocmeta!(MMStudio, :DocTestSetup, :(using MMStudio); recursive=true)
+DocMeta.setdocmeta!(ModelManagerStudio, :DocTestSetup, :(using ModelManagerStudio); recursive=true)
 
 makedocs(;
-    modules=[MMStudio],
+    modules=[ModelManagerStudio],
     authors="Daniel Bergman <danielrbergman@gmail.com> and contributors",
-    sitename="MMStudio.jl",
+    sitename="ModelManagerStudio.jl",
     format=Documenter.HTML(;
-        canonical="https://drbergman.github.io/MMStudio.jl",
+        canonical="https://drbergman.github.io/ModelManagerStudio.jl",
         edit_link="development",
         assets=String[],
     ),
@@ -18,6 +18,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/drbergman/MMStudio.jl",
+    repo="github.com/drbergman/ModelManagerStudio.jl",
     devbranch="development",
 )
