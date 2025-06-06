@@ -17,6 +17,8 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
     timeout-minutes: 60
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
@@ -42,6 +44,25 @@ jobs:
       - name: Add PCVCTRegistry
         run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman/PCVCTRegistry.git"))'
 
+      - name: Install system dependencies for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qtbase5-dev \
+            qtdeclarative5-dev \
+            qt5-qmake \
+            qml-module-qtquick-controls \
+            qml-module-qtquick-controls2 \
+            qml-module-qtquick2 \
+            qml-module-qtgraphicaleffects \
+            qml-module-qtquick-layouts \
+            qml-module-qtquick-window2 \
+            libqt5gui5 \
+            libqt5qml5 \
+            libqt5quick5 \
+            libqt5widgets5 \
+            libxcb-xinerama0
+            
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
@@ -53,6 +74,8 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
     permissions:
       actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
       contents: write
@@ -74,6 +97,24 @@ jobs:
           Pkg.develop(PackageSpec(path=pwd()))
           Pkg.instantiate()
 
+      - name: Install system dependencies for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qtbase5-dev \
+            qtdeclarative5-dev \
+            qt5-qmake \
+            qml-module-qtquick-controls \
+            qml-module-qtquick-controls2 \
+            qml-module-qtquick2 \
+            qml-module-qtgraphicaleffects \
+            qml-module-qtquick-layouts \
+            qml-module-qtquick-window2 \
+            libqt5gui5 \
+            libqt5qml5 \
+            libqt5quick5 \
+            libqt5widgets5 \
+            libxcb-xinerama0
 
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-docdeploy@v1
