@@ -1,6 +1,6 @@
-using MMStudio
+using ModelManagerStudio
 using Test
 
-@testset "MMStudio.jl" begin
+@testset "ModelManagerStudio.jl" begin
     # Write your tests here.
 end

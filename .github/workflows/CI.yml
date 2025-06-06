@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - main
+      - development
+      - test*
     tags: ['*']
   pull_request:
   workflow_dispatch:
@@ -37,6 +39,9 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
+      - name: Add PCVCTRegistry
+        run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman/PCVCTRegistry.git"))'
+
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
@@ -58,12 +63,18 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v2
+
+      - name: Add PCVCTRegistry
+        run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman/PCVCTRegistry.git"))'
+        
       - name: Configure doc environment
         shell: julia --project=docs --color=yes {0}
         run: |
           using Pkg
           Pkg.develop(PackageSpec(path=pwd()))
           Pkg.instantiate()
+
+
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-docdeploy@v1
         env:
@@ -73,6 +84,6 @@ jobs:
         shell: julia --project=docs --color=yes {0}
         run: |
           using Documenter: DocMeta, doctest
-          using MMStudio
-          DocMeta.setdocmeta!(MMStudio, :DocTestSetup, :(using MMStudio); recursive=true)
-          doctest(MMStudio)
+          using ModelManagerStudio
+          DocMeta.setdocmeta!(ModelManagerStudio, :DocTestSetup, :(using ModelManagerStudio); recursive=true)
+          doctest(ModelManagerStudio)

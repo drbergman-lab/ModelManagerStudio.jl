@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = MMStudio
+CurrentModule = ModelManagerStudio
 ```
 
-# MMStudio
+# ModelManagerStudio
 
-Documentation for [MMStudio](https://github.com/drbergman/MMStudio.jl).
+Documentation for [ModelManagerStudio](https://github.com/drbergman/ModelManagerStudio.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [MMStudio]
+Modules = [ModelManagerStudio]
 ```
