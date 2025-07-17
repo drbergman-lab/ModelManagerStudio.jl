@@ -1,7 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls
 import QtQuick.Layouts
-import org.julialang
+import jlqml
 
 ApplicationWindow {
     id: mainWindow
@@ -11,6 +11,7 @@ ApplicationWindow {
     title: "PCVCT GUI"
     width: 1400
     height: 600
+    minimumWidth: 1200
     visible: true
 
     // Add keyboard shortcut for Command+W to close the window
@@ -107,7 +108,7 @@ ApplicationWindow {
             // The inputs column
             ColumnLayout {
                 spacing: 10 // Reduced spacing for more compact vertical layout
-                Layout.preferredWidth: parent.width * 0.45
+                Layout.preferredWidth: 600
                 Layout.alignment: Qt.AlignTop
 
                 Text {
@@ -512,12 +513,12 @@ ApplicationWindow {
                         }
 
                         GradientStop {
-                            position: 0.1
+                            position: 0.01
                             color: syscolors.text
                         }
 
                         GradientStop {
-                            position: 0.9
+                            position: 0.99
                             color: syscolors.text
                         }
 
@@ -535,7 +536,7 @@ ApplicationWindow {
             // The variations column
             ColumnLayout {
                 spacing: 10 // Reduced spacing for more compact vertical layout
-                Layout.preferredWidth: parent.width * 0.45
+                Layout.preferredWidth: 600
                 Layout.alignment: Qt.AlignTop
 
                 Text {

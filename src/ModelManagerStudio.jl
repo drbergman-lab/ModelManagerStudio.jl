@@ -36,7 +36,7 @@ function studio_initialize_model_manager(args::Vararg{AbstractString}; default=:
     data_dir, physicell_dir = get_pcvct_paths(args...)
     if default == :update || !pcvct.pcvct_globals.initialized
         initializeModelManager(physicell_dir, data_dir)
-    elseif default != :keep && length(args) == 0 && (pcvct.pcvct_globals.data_dir != data_dir || pcvct.pcvct_globals.physi_cell_dir != physicell_dir)
+    elseif default != :keep && length(args) == 0 && (pcvct.pcvct_globals.data_dir != data_dir || pcvct.pcvct_globals.physicell_dir != physicell_dir)
         msg = """
         WARNING: Model Manager was previously initialized with the following paths:
             Data Directory: $(pcvct.pcvct_globals.data_dir)
@@ -110,7 +110,7 @@ end
 
 function get_input_folder(location::AbstractString)
     global inputs
-    if !isdefined(Main, :inputs)
+    if !isdefined(ModelManagerStudio, :inputs)
         return "inputs not set"
     end
     out = inputs[Symbol(location)].folder
@@ -299,7 +299,7 @@ end
 
 function get_tokens(location::AbstractString, previous_tokens::Vector{String})
     global inputs
-    if !isdefined(Main, :inputs)
+    if !isdefined(ModelManagerStudio, :inputs)
         return String[]
     end
     n_tokens = length(previous_tokens)
@@ -405,7 +405,7 @@ end
 
 function get_varied_locations()
     global inputs
-    if !isdefined(Main, :inputs)
+    if !isdefined(ModelManagerStudio, :inputs)
         return String[]
     end
     return [f.location for f in values(inputs.input_folders) if f.varied] .|> String
