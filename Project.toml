@@ -12,7 +12,7 @@ pcvct = "3c374bc7-7384-4f83-8ca0-87b8c727e6ff"
 [compat]
 Compat = "4.16.0"
 LightXML = "0.9.1"
-QML = "0.9.2"
+QML = "0.9.2, 0.10"
 julia = "1.11"
 pcvct = "0.0.26"
 
