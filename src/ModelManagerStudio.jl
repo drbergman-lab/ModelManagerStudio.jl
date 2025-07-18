@@ -1,12 +1,15 @@
 module ModelManagerStudio
 
 # Write your package code here.
-using QML, pcvct, LightXML, Compat
+using QML, pcvct, LightXML, Compat, Distributions
 
 @compat public launch
 
+include("colors.jl")
+include("record.jl")
+
 global inputs
-global tokens_avs = []
+global tokens_avs = Tuple[]
 
 function launch(args::Vararg{AbstractString}; default=:ask)
     if !studio_initialize_model_manager(args...; default=Symbol(default))
@@ -19,13 +22,15 @@ function launch(args::Vararg{AbstractString}; default=:ask)
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
 
+    initialize_record()
+
     @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names get_cell_type_names get_target_path create_variation get_current_variations variation_exists
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    loadqml(qml_file, guiproperties=JuliaPropertyMap())
+    loadqml(qml_file, guiproperties=random_color_scheme())
 
     # Run the application
     println("Launching Model Manager Studio...")
@@ -106,6 +111,11 @@ function set_input_folders(config::AbstractString, custom_code::AbstractString, 
         :ic_ecm => ic_ecm_val,
         :ic_substrate => ic_substrates_val,
         :ic_dc => ic_dcs_val])
+
+    model_manager_studio_info("Input folders set")
+    display(inputs)
+
+    record_inputs()
 end
 
 function get_input_folder(location::AbstractString)
@@ -442,28 +452,46 @@ function get_config_path(tokens::Vararg{AbstractString})
             tokens[2] = "Dirichlet_options"
         end
     end
-    return configPath([t for t in String.(tokens) if !isempty(t)]...) |> pcvct.columnName
+    s = "INVALID PATH"
+    try
+        s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> pcvct.columnName
+    catch e
+        model_manager_studio_warn("Invalid configuration path:\n\t$(join(tokens, " > "))")
+        model_manager_studio_debug("Error details: $(e.msg)")
+    end
+    return s
 end
 
 function create_variation(target::AbstractString, vals::AbstractString, tokens::Vararg{AbstractString})
     global tokens_avs
     tokens = [t for t in String.(tokens) if !isempty(t)]
     target = target |> String |> pcvct.columnNameToXMLPath
-    vals = vals |> Meta.parse |> eval
+    try
+        vals = vals |> Meta.parse |> eval
+    catch e
+        msg = """
+        Error parsing values for variation:
+          vals: $vals
+          error: $(e)
+        """
+        model_manager_studio_error(msg)
+        return
+    end
     if vals isa AbstractVector
         vals = collect(vals)
     end
     ind = find_variation_index(target)
     if isnothing(ind)
-        push!(tokens_avs, (tokens, DiscreteVariation(target, vals)))
+        push!(tokens_avs, (tokens, ElementaryVariation(target, vals)))
     else
-        tokens_avs[ind] = (tokens, DiscreteVariation(target, vals))
+        tokens_avs[ind] = (tokens, ElementaryVariation(target, vals))
     end
+    record_variations()
 end
 
 function get_current_variations()
     global tokens_avs
-    return [["$(join(tokens, " "))", "$(join(pcvct.variationValues(av), " "))"] for (tokens, av) in tokens_avs]
+    return [["$(join(tokens, " "))", "$(join(value_string(av), " "))"] for (tokens, av) in tokens_avs]
 end
 
 function variation_exists(target::AbstractString)
@@ -477,13 +505,35 @@ function find_variation_index(target::Vector{<:AbstractString})
 end
 
 function run_simulation()
-    global inputs
+    global inputs, tokens_avs
 
+    record_run()
+    
     # Run the simulation with the provided inputs
     run(inputs, [av for (_, av) in tokens_avs])
 
     # Emit signal when simulation is complete
     @emit simulationFinished()
+end
+
+model_manager_studio_info(message::AbstractString; kws...) = model_manager_studio_log(:info, message; kws...)
+model_manager_studio_warn(message::AbstractString; kws...) = model_manager_studio_log(:warn, message; kws...)
+model_manager_studio_error(message::AbstractString; kws...) = model_manager_studio_log(:error, message; kws...)
+model_manager_studio_debug(message::AbstractString; kws...) = model_manager_studio_log(:debug, message; kws...)
+
+function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
+    @assert type ∈ [:info, :warn, :error, :debug] "Log type must be either :info, :warn, :error, or :debug, got $type"
+    header = "---ModelManagerStudio.jl---"
+    if type == :info
+        @info header kws...
+    elseif type == :warn
+        @warn header kws...
+    elseif type == :error
+        @error header kws...
+    elseif type == :debug
+        @debug header kws...
+    end
+    println(message)
 end
 
 end
