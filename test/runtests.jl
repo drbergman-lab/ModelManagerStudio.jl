@@ -1,6 +1,7 @@
-using ModelManagerStudio
-using Test
+using ModelManagerStudio, pcvct, Test
+
+createProject()
 
 @testset "ModelManagerStudio.jl" begin
-    # Write your tests here.
+    ModelManagerStudio.launch()
 end
