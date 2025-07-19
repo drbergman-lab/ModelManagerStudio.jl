@@ -98,7 +98,6 @@ ApplicationWindow {
 
         // Simulated tab bar
         Rectangle {
-            // color: "#22489e"
             color: guiproperties.color_top
             Layout.fillWidth: true
             Layout.preferredHeight: 40
@@ -1226,7 +1225,6 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 60
-            // color: "#228B22"
             color: guiproperties.color_bottom
             // Run Simulation
             Button {

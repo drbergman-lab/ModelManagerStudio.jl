@@ -11,7 +11,7 @@ include("record.jl")
 global inputs
 global tokens_avs = Tuple[]
 
-function launch(args::Vararg{AbstractString}; default=:ask)
+function init_model_manager_gui(args::Vararg{AbstractString}; default=:ask)
     if !studio_initialize_model_manager(args...; default=Symbol(default))
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
@@ -30,9 +30,12 @@ function launch(args::Vararg{AbstractString}; default=:ask)
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    loadqml(qml_file, guiproperties=random_color_scheme())
+    return loadqml(qml_file, guiproperties=random_color_scheme())
+end
 
+function launch(args...; kwargs...)
     # Run the application
+    e = init_model_manager_gui(args...; kwargs...)
     println("Launching Model Manager Studio...")
     exec()
 end
