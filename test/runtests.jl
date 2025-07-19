@@ -1,6 +1,8 @@
-using ModelManagerStudio
-using Test
+using ModelManagerStudio, pcvct, Test, QML
+
+createProject()
 
 @testset "ModelManagerStudio.jl" begin
-    # Write your tests here.
+    e = ModelManagerStudio.init_model_manager_gui()
+    QML.quit(e)
 end
