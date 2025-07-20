@@ -120,6 +120,7 @@ ApplicationWindow {
 
                         text: "test"
                         font.bold: true
+                        font.underline: index === tabBar.currentIndex // Underline the current tab
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
                         onClicked: {
                             tabBar.currentIndex = index; // Update the current index when clicked
@@ -132,7 +133,7 @@ ApplicationWindow {
                             implicitWidth: 100
                             implicitHeight: 25
                             border.width: 2
-                            border.color: "#000000"
+                            border.color: index === tabBar.currentIndex ? "#000000" : "#a0a0a0" // Darker border for selected tab
                             radius: 4
                         }
 
@@ -175,7 +176,7 @@ ApplicationWindow {
                 ColumnLayout {
                     spacing: 10 // Reduced spacing for more compact vertical layout
                     anchors.centerIn: parent
-                    anchors.margins: parent
+                    anchors.fill: parent
 
                     // Required Locations
                     Text {
@@ -386,6 +387,9 @@ ApplicationWindow {
                     // Current inputs display
                     ColumnLayout {
                         Layout.fillHeight: true
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 50
+                        Layout.rightMargin: 50
 
                         Text {
                             text: "Current Inputs"
@@ -1084,8 +1088,6 @@ ApplicationWindow {
 
             // Run Simulation
             Button {
-                // Julia.run_simulation();
-
                 id: runSimulationButton
 
                 anchors.centerIn: parent
