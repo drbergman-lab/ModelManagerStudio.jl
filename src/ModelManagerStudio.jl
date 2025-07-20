@@ -30,7 +30,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; default=:ask)
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    return loadqml(qml_file, guiproperties=random_color_scheme())
+    return loadqml(qml_file, guiproperties=random_color_scheme(), inputsproperties=inputs_properties())
 end
 
 function launch(args...; kwargs...)
@@ -537,6 +537,18 @@ function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
         @debug header kws...
     end
     println(message)
+end
+
+function inputs_properties()
+    pl = pcvct.projectLocations()
+    n_req = length(pl.required)
+    n_opt = length(pl.all) - n_req
+    max_per_row = 4
+    req_n_rows = ceil(n_req / max_per_row)
+    req_n_cols = min(max_per_row, n_req)
+    opt_n_rows = ceil(n_opt / max_per_row)
+    opt_n_cols = min(max_per_row, n_opt)
+    return JuliaPropertyMap("req_n_rows" => req_n_rows, "req_n_cols" => req_n_cols, "opt_n_rows" => opt_n_rows, "opt_n_cols" => opt_n_cols)
 end
 
 end

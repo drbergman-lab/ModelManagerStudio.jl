@@ -190,7 +190,8 @@ ApplicationWindow {
 
                     GridLayout {
                         Layout.alignment: Qt.AlignCenter
-                        columns: 2
+                        rows: inputsproperties.req_n_rows
+                        columns: inputsproperties.req_n_cols
 
                         Loader {
                             id: configLocationLoader
@@ -239,14 +240,14 @@ ApplicationWindow {
                         // non-IC optional locations
                         GridLayout {
                             Layout.alignment: Qt.AlignCenter
-                            rows: 2
+                            rows: inputsproperties.opt_n_rows
+                            columns: inputsproperties.opt_n_cols
+                            flow: GridLayout.TopToBottom
 
                             // Rules folder - First row, first column
                             Loader {
                                 id: rulesLocationLoader
 
-                                Layout.row: 0
-                                Layout.column: 0
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "Rules folder";
@@ -261,8 +262,6 @@ ApplicationWindow {
                             Loader {
                                 id: intracellularLocationLoader
 
-                                Layout.row: 1
-                                Layout.column: 0
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "Intracellular folder";
@@ -273,34 +272,10 @@ ApplicationWindow {
                                 }
                             }
 
-                        }
-
-                        Item {
-                            Layout.alignment: Qt.AlignCenter
-                            implicitHeight: parent.height
-                            Layout.preferredWidth: 10
-
-                            Rectangle {
-                                anchors.centerIn: parent
-                                height: parent.height
-                                width: 2
-                                color: syscolors.text
-                            }
-
-                        }
-
-                        // IC optional locations
-                        GridLayout {
-                            Layout.alignment: Qt.AlignCenter
-                            rows: 2
-                            columns: 2
-
                             // IC cell folder - first row, first column
                             Loader {
                                 id: icCellLocationLoader
 
-                                Layout.row: 0
-                                Layout.column: 0
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "IC cell folder";
@@ -315,8 +290,6 @@ ApplicationWindow {
                             Loader {
                                 id: icEcmLocationLoader
 
-                                Layout.row: 1
-                                Layout.column: 0
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "IC ECM folder";
@@ -331,8 +304,6 @@ ApplicationWindow {
                             Loader {
                                 id: icSubstrateLocationLoader
 
-                                Layout.row: 0
-                                Layout.column: 1
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "IC substrate folder";
@@ -347,8 +318,6 @@ ApplicationWindow {
                             Loader {
                                 id: icDcLocationLoader
 
-                                Layout.row: 1
-                                Layout.column: 1
                                 sourceComponent: locationComponent
                                 onLoaded: {
                                     item.labelText = "IC DC folder";
