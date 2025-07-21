@@ -37,7 +37,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    return loadqml(qml_file, guiproperties=random_color_scheme(), project_configuration_properties=create_project_configuration_properties())
+    return loadqml(qml_file, guiproperties=color_scheme(), project_configuration_properties=create_project_configuration_properties())
 end
 
 """
