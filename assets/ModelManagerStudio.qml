@@ -189,35 +189,31 @@ ApplicationWindow {
                     }
 
                     GridLayout {
+                        id: reqGridLayout
+
                         Layout.alignment: Qt.AlignCenter
-                        rows: inputsproperties.req_n_rows
-                        columns: inputsproperties.req_n_cols
+                        rows: project_configuration_properties.req_n_rows
+                        columns: project_configuration_properties.req_n_cols
+                        flow: GridLayout.TopToBottom
 
-                        Loader {
-                            id: configLocationLoader
+                        Repeater {
+                            id: requiredLocationsRepeater
 
-                            sourceComponent: locationComponent
-                            onLoaded: {
-                                item.labelText = "Config folder";
-                                item.location = "config";
-                                item.isRequired = true;
-                                item.isVaried = true;
-                                item.comboBox.updateFolders();
+                            model: project_configuration_properties.req_locations
+
+                            delegate: Loader {
+                                id: requiredLocationLoader
+
+                                sourceComponent: locationComponent
+                                onLoaded: {
+                                    item.labelText = Julia.location_label(modelData);
+                                    item.location = modelData; // Convert to a suitable location name
+                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.isRequired = true; // Set required state
+                                    item.comboBox.updateFolders(); // Update folders in the combo box
+                                }
                             }
-                        }
 
-                        // Custom code folders
-                        Loader {
-                            id: customCodeLocationLoader
-
-                            sourceComponent: locationComponent
-                            onLoaded: {
-                                item.labelText = "Custom code folder";
-                                item.location = "custom_code";
-                                item.isVaried = false;
-                                item.isRequired = true;
-                                item.comboBox.updateFolders();
-                            }
                         }
 
                     }
@@ -232,99 +228,29 @@ ApplicationWindow {
                         font.pixelSize: mainWindow.fontSizeOfLevel[1]
                     }
 
-                    RowLayout {
-                        // Row for optional locations
+                    GridLayout {
+                        id: optGridLayout
+
                         Layout.alignment: Qt.AlignCenter
-                        spacing: 2 // Maintain spacing between items
+                        rows: project_configuration_properties.opt_n_rows
+                        columns: project_configuration_properties.opt_n_cols
+                        flow: GridLayout.TopToBottom
 
-                        // non-IC optional locations
-                        GridLayout {
-                            Layout.alignment: Qt.AlignCenter
-                            rows: inputsproperties.opt_n_rows
-                            columns: inputsproperties.opt_n_cols
-                            flow: GridLayout.TopToBottom
+                        Repeater {
+                            id: optionalLocationsRepeater
 
-                            // Rules folder - First row, first column
-                            Loader {
-                                id: rulesLocationLoader
+                            model: project_configuration_properties.opt_locations
 
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "Rules folder";
-                                    item.location = "rulesets_collection";
-                                    item.isRequired = false;
-                                    item.isVaried = true;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // Intracellular folder - First row, second column
-                            Loader {
-                                id: intracellularLocationLoader
+                            delegate: Loader {
+                                id: optionalLocationLoader
 
                                 sourceComponent: locationComponent
                                 onLoaded: {
-                                    item.labelText = "Intracellular folder";
-                                    item.location = "intracellular";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC cell folder - first row, first column
-                            Loader {
-                                id: icCellLocationLoader
-
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC cell folder";
-                                    item.location = "ic_cell";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC ECM folder - Second row, first column
-                            Loader {
-                                id: icEcmLocationLoader
-
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC ECM folder";
-                                    item.location = "ic_ecm";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC substrate folder - first row, second column
-                            Loader {
-                                id: icSubstrateLocationLoader
-
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC substrate folder";
-                                    item.location = "ic_substrate";
-                                    item.isVaried = false;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC DC folder - Second row, second column
-                            Loader {
-                                id: icDcLocationLoader
-
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC DC folder";
-                                    item.location = "ic_dc";
-                                    item.isVaried = false;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
+                                    item.labelText = Julia.location_label(modelData);
+                                    item.location = modelData; // Convert to a suitable location name
+                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.isRequired = false; // Set required state
+                                    item.comboBox.updateFolders(); // Update folders in the combo box
                                 }
                             }
 
@@ -341,7 +267,10 @@ ApplicationWindow {
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
                         onClicked: {
                             // Set input folders in Julia
-                            Julia.set_input_folders(configLocationLoader.item.comboBox.currentText, customCodeLocationLoader.item.comboBox.currentText, rulesLocationLoader.item.comboBox.currentText, intracellularLocationLoader.item.comboBox.currentText, icCellLocationLoader.item.comboBox.currentText, icEcmLocationLoader.item.comboBox.currentText, icSubstrateLocationLoader.item.comboBox.currentText, icDcLocationLoader.item.comboBox.currentText);
+                            var tokens = [];
+                            for (let i = 0; i < requiredLocationsRepeater.count; ++i) tokens.push(requiredLocationsRepeater.itemAt(i).item.comboBox.currentText)
+                            for (let i = 0; i < optionalLocationsRepeater.count; ++i) tokens.push(optionalLocationsRepeater.itemAt(i).item.comboBox.currentText)
+                            Julia.set_input_folders.apply(Julia, tokens);
                             // Update the display to show current selections
                             requiredLocationsDisplay.updateFolderDisplay();
                             optionalLocationsDisplay.updateFolderDisplay();
@@ -350,6 +279,10 @@ ApplicationWindow {
                             inputsDisplay.visible = true;
                             locationComboBox.model = Julia.get_varied_locations();
                             currentVariationTargetText.updateVariationTarget(); // Update the target text
+                            if (runSimulationButton.enabled === false) {
+                                runSimulationButton.enabled = true; // Enable the run simulation button
+                                runSimulationButton.disabledText = "Running...";
+                            }
                         }
                     }
 
@@ -1059,22 +992,30 @@ ApplicationWindow {
             Button {
                 id: runSimulationButton
 
+                property string disabledText: "Create inputs first..."
+
                 anchors.centerIn: parent
                 implicitHeight: 45
                 implicitWidth: 200
-                text: "Run Simulation"
+                text: enabled ? "Run Simulation" : disabledText
                 font.pixelSize: mainWindow.fontSizeOfLevel[1]
                 font.bold: true
-                enabled: true
+                enabled: false
                 onClicked: {
                     // Call Julia function to run the simulation
                     // Disable button to prevent multiple clicks
-                    runSimulationButton.enabled = false;
-                    runSimulationButton.text = "Running...";
-                    Qt.callLater(function() {
-                        Julia.run_simulation();
-                    });
+                    enabled = false;
+                    start_run_timer.start();
                 }
+            }
+
+            Timer {
+                id: start_run_timer
+
+                running: false
+                interval: 10 // 10 millisecond delay before running the simulation
+                repeat: false
+                onTriggered: Julia.run_simulation()
             }
 
         }
@@ -1084,10 +1025,7 @@ ApplicationWindow {
     JuliaSignals {
         signal simulationFinished()
 
-        onSimulationFinished: function() {
-            runSimulationButton.enabled = true;
-            runSimulationButton.text = "Run Simulation";
-        }
+        onSimulationFinished: runSimulationButton.enabled = true
     }
 
 }
