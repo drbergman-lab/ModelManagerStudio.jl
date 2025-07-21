@@ -8,6 +8,8 @@ using QML, pcvct, LightXML, Compat, Distributions
 include("colors.jl")
 include("record.jl")
 
+global current_required_locations
+global current_optional_locations
 global inputs
 global tokens_avs = Tuple[]
 
@@ -17,7 +19,7 @@ global tokens_avs = Tuple[]
 Internal function to initialize the Model Manager GUI with the specified arguments.
 Called by [`launch`](@ref).
 """
-function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
+function init_model_manager_gui(args::Vararg{AbstractString}; testing::Bool=false, kwargs...)
     if !studio_initialize_model_manager(args...; kwargs...)
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
@@ -37,7 +39,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    return loadqml(qml_file, guiproperties=color_scheme(), project_configuration_properties=create_project_configuration_properties())
+    return loadqml(qml_file; reqLocModel=required_input_folders(), optLocModel=optional_input_folders(), guiproperties=color_scheme(), project_configuration_properties=create_project_configuration_properties(), testing=JuliaPropertyMap("testing" => testing))
 end
 
 """
@@ -166,20 +168,12 @@ function get_folders(location::AbstractString, required::Bool)
     return out
 end
 
-function set_input_folders(tokens::Vararg{AbstractString})
-    global inputs
+function set_input_folders()
+    global current_required_locations, current_optional_locations, inputs
 
-    tokens = [String.(tokens)...]
     kwargs = Dict{Symbol, String}()
-    required_tokens = tokens[1:length(pcvct.projectLocations().required)]
-    optional_tokens = tokens[length(pcvct.projectLocations().required)+1:end]
-
-    for (loc, folder) in zip(pcvct.projectLocations().required, required_tokens)
-        kwargs[loc] = folder
-    end
-
-    for (loc, folder) in zip(setdiff(pcvct.projectLocations().all, pcvct.projectLocations().required), optional_tokens)
-        kwargs[loc] = folder == "--NONE--" ? "" : folder
+    for loc in current_required_locations ∪ current_optional_locations
+        kwargs[Symbol(loc.location)] = loc.folder == "--NONE--" ? "" : loc.folder
     end
 
     inputs = InputFolders(; kwargs...)
@@ -635,5 +629,46 @@ function location_label(location::AbstractString)
 end
 
 is_varied_location(location::AbstractString) = Symbol(location) ∈ pcvct.projectLocations().varied
+
+function is_varied_location(location::AbstractString, folder::AbstractString)
+    folder = String(folder)
+    if isempty(folder) || folder == "--NONE--"
+        return false
+    end
+    input_folder = pcvct.InputFolder(Symbol(location), folder)
+    return input_folder.varied
+end
+
+mutable struct MMSFolder
+    location::String
+    labelText::String
+    folder::String
+end
+
+function required_input_folders()
+    global current_required_locations
+    pl = pcvct.projectLocations()
+    current_required_locations = MMSFolder[]
+    for loc in pl.required
+        loc_str = String(loc)
+        loc_folder = MMSFolder(loc_str, location_label(loc_str), "")
+        push!(current_required_locations, loc_folder)
+    end
+    req_location_model = JuliaItemModel(current_required_locations)
+    return req_location_model
+end
+
+function optional_input_folders()
+    global current_optional_locations
+    pl = pcvct.projectLocations()
+    current_optional_locations = MMSFolder[]
+    for loc in setdiff(pl.all, pl.required)
+        loc_str = String(loc)
+        loc_folder = MMSFolder(loc_str, location_label(loc_str), "")
+        push!(current_optional_locations, loc_folder)
+    end
+    opt_location_model = JuliaItemModel(current_optional_locations)
+    return opt_location_model
+end
 
 end

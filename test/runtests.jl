@@ -4,8 +4,25 @@ createProject()
 
 @testset "ModelManagerStudio.jl" begin
     @testset "GUI initialization" begin
-        e = ModelManagerStudio.init_model_manager_gui()
-        QML.quit(e)
+        @test begin
+            ModelManagerStudio.launch(; testing=true)
+            true
+        end
+
+        for args in [["."], [joinpath(".", "data"), joinpath(".", "PhysiCell")]]
+            data_dir, physicell_dir = ModelManagerStudio.get_pcvct_paths(args...)
+            @test isdir(data_dir)
+            @test isdir(physicell_dir)
+            @test abspath(data_dir) == abspath(joinpath(".", "data"))
+            @test abspath(physicell_dir) == abspath(joinpath(".", "PhysiCell"))
+        end
+    end
+
+    @testset "Creating inputs" begin
+        ModelManagerStudio.set_input_folders()
+        inputs = ModelManagerStudio.inputs
+        @test inputs[:config].folder == "0_template"
+        @test inputs[:custom_code].folder == "0_template"
     end
 
     @testset "Reinit Policies" begin
