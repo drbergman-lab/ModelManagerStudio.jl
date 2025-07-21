@@ -24,13 +24,14 @@ function init_model_manager_gui(args::Vararg{AbstractString}; default=:ask)
 
     initialize_record()
 
-    @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names get_cell_type_names get_target_path create_variation get_current_variations variation_exists
+    @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
+    @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
 
     # Load the QML file
-    return loadqml(qml_file, guiproperties=random_color_scheme())
+    return loadqml(qml_file, guiproperties=random_color_scheme(), project_configuration_properties=create_project_configuration_properties())
 end
 
 function launch(args...; kwargs...)
@@ -89,31 +90,23 @@ function get_folders(location::AbstractString, required::Bool)
     return out
 end
 
-function set_input_folders(config::AbstractString, custom_code::AbstractString, rules::AbstractString,
-    intracellulars::AbstractString, ic_cell::AbstractString, ic_ecm::AbstractString,
-    ic_substrate::AbstractString, ic_dc::AbstractString)
+function set_input_folders(tokens::Vararg{AbstractString})
     global inputs
 
-    # make required folders Strings
-    config_val = String(config)
-    custom_code_val = String(custom_code)
+    tokens = [String.(tokens)...]
+    kwargs = Dict{Symbol, String}()
+    required_tokens = tokens[1:length(pcvct.projectLocations().required)]
+    optional_tokens = tokens[length(pcvct.projectLocations().required)+1:end]
 
-    # Replace "--NONE--" with nothing for optional parameters
-    rules_val = rules == "--NONE--" ? "" : String(rules)
-    intracellulars_val = intracellulars == "--NONE--" ? "" : String(intracellulars)
-    ic_cell_val = ic_cell == "--NONE--" ? "" : String(ic_cell)
-    ic_ecm_val = ic_ecm == "--NONE--" ? "" : String(ic_ecm)
-    ic_substrates_val = ic_substrate == "--NONE--" ? "" : String(ic_substrate)
-    ic_dcs_val = ic_dc == "--NONE--" ? "" : String(ic_dc)
+    for (loc, folder) in zip(pcvct.projectLocations().required, required_tokens)
+        kwargs[loc] = folder
+    end
 
-    inputs = InputFolders([:config => config_val,
-        :custom_code => custom_code_val,
-        :rulesets_collection => rules_val,
-        :intracellular => intracellulars_val,
-        :ic_cell => ic_cell_val,
-        :ic_ecm => ic_ecm_val,
-        :ic_substrate => ic_substrates_val,
-        :ic_dc => ic_dcs_val])
+    for (loc, folder) in zip(setdiff(pcvct.projectLocations().all, pcvct.projectLocations().required), optional_tokens)
+        kwargs[loc] = folder == "--NONE--" ? "" : folder
+    end
+
+    inputs = InputFolders(; kwargs...)
 
     model_manager_studio_info("Input folders set")
     display(inputs)
@@ -538,5 +531,33 @@ function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
     end
     println(message)
 end
+
+function create_project_configuration_properties()
+    pl = pcvct.projectLocations()
+    req_locs = [pl.required...]
+    opt_locs = setdiff(pl.all, req_locs)
+
+    n_req = length(req_locs)
+    n_opt = length(opt_locs)
+
+    max_per_row = 4
+    req_n_rows = ceil(n_req / max_per_row) |> Int
+    req_n_cols = min(max_per_row, n_req)
+    opt_n_rows = ceil(n_opt / max_per_row) |> Int
+    opt_n_cols = min(max_per_row, n_opt)
+    return JuliaPropertyMap("req_n_rows" => req_n_rows, "req_n_cols" => req_n_cols, "opt_n_rows" => opt_n_rows, "opt_n_cols" => opt_n_cols,
+        "req_locations" => String.(req_locs), "opt_locations" => String.(opt_locs))
+end
+
+function location_label(location::AbstractString)
+    out = replace(location, "_" => " ", "ecm" => "ECM", "dc" => "DC")
+    # be careful to only replace "ic" at the start of the string when it indicates the initial conditions
+    if startswith(out, "ic ")
+        out = "IC $(out[4:end])"
+    end
+    return uppercasefirst(out) * " folder"
+end
+
+is_varied_location(location::AbstractString) = Symbol(location) ∈ pcvct.projectLocations().varied
 
 end

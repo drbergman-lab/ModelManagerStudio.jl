@@ -105,6 +105,8 @@ ApplicationWindow {
             RowLayout {
                 id: tabBar
 
+                property int currentIndex: 0 // Track the currently selected tab index
+
                 spacing: 0
                 anchors.centerIn: parent
 
@@ -115,33 +117,23 @@ ApplicationWindow {
                         id: button
 
                         property int index: -1 // Allow access to the index of the tab
-                        property alias bkg_color: background.color // Allow access to the background color
 
                         text: "test"
                         font.bold: true
+                        font.underline: index === tabBar.currentIndex // Underline the current tab
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
                         onClicked: {
-                            stack.currentIndex = index;
-                            for (let i = 0; i < tabBar.children.length; ++i) {
-                                let loaded = tabBar.children[i].item;
-                                if (!loaded)
-                                    continue;
-
-                                if (loaded !== this)
-                                    loaded.bkg_color = "#ffffff";
-                                else
-                                    this.bkg_color = guiproperties.color_button;
-                            }
+                            tabBar.currentIndex = index; // Update the current index when clicked
                         }
 
                         background: Rectangle {
                             id: background
 
-                            color: "#ffffff" // Default color
+                            color: index === tabBar.currentIndex ? guiproperties.color_button : "#ffffff" // Change color based on current index
                             implicitWidth: 100
                             implicitHeight: 25
                             border.width: 2
-                            border.color: "#000000"
+                            border.color: index === tabBar.currentIndex ? "#000000" : "#a0a0a0" // Darker border for selected tab
                             radius: 4
                         }
 
@@ -158,9 +150,6 @@ ApplicationWindow {
                         onLoaded: {
                             item.text = modelData; // Set the text based on the model data
                             item.index = index; // Set the index for the tab
-                            if (index === 0) {
-                                item.bkg_color = guiproperties.color_button;
-                            }
                         }
                         sourceComponent: tabButtonComponent
                     }
@@ -175,6 +164,7 @@ ApplicationWindow {
         StackLayout {
             id: stack
 
+            currentIndex: tabBar.currentIndex
             Layout.fillWidth: true
             Layout.fillHeight: true
 
@@ -186,7 +176,7 @@ ApplicationWindow {
                 ColumnLayout {
                     spacing: 10 // Reduced spacing for more compact vertical layout
                     anchors.centerIn: parent
-                    anchors.margins: parent
+                    anchors.fill: parent
 
                     // Required Locations
                     Text {
@@ -199,34 +189,31 @@ ApplicationWindow {
                     }
 
                     GridLayout {
+                        id: reqGridLayout
+
                         Layout.alignment: Qt.AlignCenter
-                        columns: 2
+                        rows: project_configuration_properties.req_n_rows
+                        columns: project_configuration_properties.req_n_cols
+                        flow: GridLayout.TopToBottom
 
-                        Loader {
-                            id: configLocationLoader
+                        Repeater {
+                            id: requiredLocationsRepeater
 
-                            sourceComponent: locationComponent
-                            onLoaded: {
-                                item.labelText = "Config folder";
-                                item.location = "config";
-                                item.isRequired = true;
-                                item.isVaried = true;
-                                item.comboBox.updateFolders();
+                            model: project_configuration_properties.req_locations
+
+                            delegate: Loader {
+                                id: requiredLocationLoader
+
+                                sourceComponent: locationComponent
+                                onLoaded: {
+                                    item.labelText = Julia.location_label(modelData);
+                                    item.location = modelData; // Convert to a suitable location name
+                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.isRequired = true; // Set required state
+                                    item.comboBox.updateFolders(); // Update folders in the combo box
+                                }
                             }
-                        }
 
-                        // Custom code folders
-                        Loader {
-                            id: customCodeLocationLoader
-
-                            sourceComponent: locationComponent
-                            onLoaded: {
-                                item.labelText = "Custom code folder";
-                                item.location = "custom_code";
-                                item.isVaried = false;
-                                item.isRequired = true;
-                                item.comboBox.updateFolders();
-                            }
                         }
 
                     }
@@ -241,131 +228,29 @@ ApplicationWindow {
                         font.pixelSize: mainWindow.fontSizeOfLevel[1]
                     }
 
-                    RowLayout {
-                        // Row for optional locations
+                    GridLayout {
+                        id: optGridLayout
+
                         Layout.alignment: Qt.AlignCenter
-                        spacing: 2 // Maintain spacing between items
+                        rows: project_configuration_properties.opt_n_rows
+                        columns: project_configuration_properties.opt_n_cols
+                        flow: GridLayout.TopToBottom
 
-                        // non-IC optional locations
-                        GridLayout {
-                            Layout.alignment: Qt.AlignCenter
-                            rows: 2
+                        Repeater {
+                            id: optionalLocationsRepeater
 
-                            // Rules folder - First row, first column
-                            Loader {
-                                id: rulesLocationLoader
+                            model: project_configuration_properties.opt_locations
 
-                                Layout.row: 0
-                                Layout.column: 0
+                            delegate: Loader {
+                                id: optionalLocationLoader
+
                                 sourceComponent: locationComponent
                                 onLoaded: {
-                                    item.labelText = "Rules folder";
-                                    item.location = "rulesets_collection";
-                                    item.isRequired = false;
-                                    item.isVaried = true;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // Intracellular folder - First row, second column
-                            Loader {
-                                id: intracellularLocationLoader
-
-                                Layout.row: 1
-                                Layout.column: 0
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "Intracellular folder";
-                                    item.location = "intracellular";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                        }
-
-                        Item {
-                            Layout.alignment: Qt.AlignCenter
-                            implicitHeight: parent.height
-                            Layout.preferredWidth: 10
-
-                            Rectangle {
-                                anchors.centerIn: parent
-                                height: parent.height
-                                width: 2
-                                color: syscolors.text
-                            }
-
-                        }
-
-                        // IC optional locations
-                        GridLayout {
-                            Layout.alignment: Qt.AlignCenter
-                            rows: 2
-                            columns: 2
-
-                            // IC cell folder - first row, first column
-                            Loader {
-                                id: icCellLocationLoader
-
-                                Layout.row: 0
-                                Layout.column: 0
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC cell folder";
-                                    item.location = "ic_cell";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC ECM folder - Second row, first column
-                            Loader {
-                                id: icEcmLocationLoader
-
-                                Layout.row: 1
-                                Layout.column: 0
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC ECM folder";
-                                    item.location = "ic_ecm";
-                                    item.isVaried = true;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC substrate folder - first row, second column
-                            Loader {
-                                id: icSubstrateLocationLoader
-
-                                Layout.row: 0
-                                Layout.column: 1
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC substrate folder";
-                                    item.location = "ic_substrate";
-                                    item.isVaried = false;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
-                                }
-                            }
-
-                            // IC DC folder - Second row, second column
-                            Loader {
-                                id: icDcLocationLoader
-
-                                Layout.row: 1
-                                Layout.column: 1
-                                sourceComponent: locationComponent
-                                onLoaded: {
-                                    item.labelText = "IC DC folder";
-                                    item.location = "ic_dc";
-                                    item.isVaried = false;
-                                    item.isRequired = false;
-                                    item.comboBox.updateFolders();
+                                    item.labelText = Julia.location_label(modelData);
+                                    item.location = modelData; // Convert to a suitable location name
+                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.isRequired = false; // Set required state
+                                    item.comboBox.updateFolders(); // Update folders in the combo box
                                 }
                             }
 
@@ -382,7 +267,10 @@ ApplicationWindow {
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
                         onClicked: {
                             // Set input folders in Julia
-                            Julia.set_input_folders(configLocationLoader.item.comboBox.currentText, customCodeLocationLoader.item.comboBox.currentText, rulesLocationLoader.item.comboBox.currentText, intracellularLocationLoader.item.comboBox.currentText, icCellLocationLoader.item.comboBox.currentText, icEcmLocationLoader.item.comboBox.currentText, icSubstrateLocationLoader.item.comboBox.currentText, icDcLocationLoader.item.comboBox.currentText);
+                            var tokens = [];
+                            for (let i = 0; i < requiredLocationsRepeater.count; ++i) tokens.push(requiredLocationsRepeater.itemAt(i).item.comboBox.currentText)
+                            for (let i = 0; i < optionalLocationsRepeater.count; ++i) tokens.push(optionalLocationsRepeater.itemAt(i).item.comboBox.currentText)
+                            Julia.set_input_folders.apply(Julia, tokens);
                             // Update the display to show current selections
                             requiredLocationsDisplay.updateFolderDisplay();
                             optionalLocationsDisplay.updateFolderDisplay();
@@ -391,12 +279,19 @@ ApplicationWindow {
                             inputsDisplay.visible = true;
                             locationComboBox.model = Julia.get_varied_locations();
                             currentVariationTargetText.updateVariationTarget(); // Update the target text
+                            if (runSimulationButton.enabled === false) {
+                                runSimulationButton.enabled = true; // Enable the run simulation button
+                                runSimulationButton.disabledText = "Running...";
+                            }
                         }
                     }
 
                     // Current inputs display
                     ColumnLayout {
                         Layout.fillHeight: true
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 50
+                        Layout.rightMargin: 50
 
                         Text {
                             text: "Current Inputs"
@@ -681,142 +576,11 @@ ApplicationWindow {
                                     clip: true
 
                                     Row {
-                                    // ComboBox {
-                                    //     id: tokenComboBoxOne
-                                    //     property int longestTextWidth: 0
-                                    //     function updateLongestTextWidth() {
-                                    //         let longest = "";
-                                    //         for (let i = 0; i < model.length; ++i) if (model[i].length > longest.length) {
-                                    //             longest = model[i];
-                                    //         }
-                                    //         dummyTextItemOne.text = longest;
-                                    //         longestTextWidth = dummyTextItemOne.implicitWidth;
-                                    //     }
-                                    //     width: longestTextWidth + 50
-                                    //     model: []
-                                    //     // Layout.preferredWidth: 120
-                                    //     Layout.fillWidth: true
-                                    //     // Use the colored delegate
-                                    //     delegate: coloredItemDelegate
-                                    //     onModelChanged: updateLongestTextWidth()
-                                    //     onCurrentTextChanged: {
-                                    //         // Update the token combo boxes based on the selected location
-                                    //         // Prevent updates while changing location
-                                    //         tokenComboBoxTwo.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText);
-                                    //         tokenComboBoxThree.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText);
-                                    //         tokenComboBoxFour.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText);
-                                    //         currentVariationTargetText.updateVariationTarget(); // Update the target text
-                                    //     }
-                                    //     visible: model.length > 0 // Enable only if there are tokens available
-                                    //     Text {
-                                    //         id: dummyTextItemOne
-                                    //         visible: false
-                                    //         font: tokenComboBoxOne.font
-                                    //     }
-                                    // }
-                                    // ComboBox {
-                                    //     id: tokenComboBoxTwo
-                                    //     property int longestTextWidth: 0
-                                    //     function updateLongestTextWidth() {
-                                    //         let longest = "";
-                                    //         for (let i = 0; i < model.length; ++i) if (model[i].length > longest.length) {
-                                    //             longest = model[i];
-                                    //         }
-                                    //         dummyTextItemTwo.text = longest;
-                                    //         longestTextWidth = dummyTextItemTwo.implicitWidth;
-                                    //     }
-                                    //     width: longestTextWidth + 50
-                                    //     model: []
-                                    //     // Layout.preferredWidth: 120
-                                    //     Layout.fillWidth: true
-                                    //     // Use the colored delegate
-                                    //     delegate: coloredItemDelegate
-                                    //     onModelChanged: updateLongestTextWidth()
-                                    //     onCurrentTextChanged: {
-                                    //         // Update the token combo boxes based on the selected location
-                                    //         // Prevent updates while changing location
-                                    //         tokenComboBoxThree.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText);
-                                    //         tokenComboBoxFour.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText);
-                                    //         currentVariationTargetText.updateVariationTarget(); // Update the target text
-                                    //     }
-                                    //     visible: model.length > 0 // Enable only if there are tokens available
-                                    //     Text {
-                                    //         id: dummyTextItemTwo
-                                    //         visible: false
-                                    //         font: tokenComboBoxTwo.font
-                                    //     }
-                                    // }
-                                    // ComboBox {
-                                    //     id: tokenComboBoxThree
-                                    //     property int longestTextWidth: 0
-                                    //     function updateLongestTextWidth() {
-                                    //         let longest = "";
-                                    //         for (let i = 0; i < model.length; ++i) if (model[i].length > longest.length) {
-                                    //             longest = model[i];
-                                    //         }
-                                    //         dummyTextItemThree.text = longest;
-                                    //         longestTextWidth = dummyTextItemThree.implicitWidth;
-                                    //     }
-                                    //     width: longestTextWidth + 50
-                                    //     model: []
-                                    //     // Layout.preferredWidth: 120
-                                    //     Layout.fillWidth: true
-                                    //     // Use the colored delegate
-                                    //     delegate: coloredItemDelegate
-                                    //     onModelChanged: updateLongestTextWidth()
-                                    //     onCurrentTextChanged: {
-                                    //         // Update the token combo boxes based on the selected location
-                                    //         // Prevent updates while changing location
-                                    //         tokenComboBoxFour.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText);
-                                    //         currentVariationTargetText.updateVariationTarget(); // Update the target text
-                                    //     }
-                                    //     visible: model.length > 0 // Enable only if there are tokens available
-                                    //     Text {
-                                    //         id: dummyTextItemThree
-                                    //         visible: false
-                                    //         font: tokenComboBoxThree.font
-                                    //     }
-                                    // }
-                                    // ComboBox {
-                                    //     id: tokenComboBoxFour
-                                    //     property int longestTextWidth: 0
-                                    //     function updateLongestTextWidth() {
-                                    //         if (model === undefined)
-                                    //             return 0;
-                                    //         let longest = "";
-                                    //         for (let i = 0; i < model.length; ++i) if (model[i].length > longest.length) {
-                                    //             longest = model[i];
-                                    //         }
-                                    //         dummyTextItemFour.text = longest;
-                                    //         longestTextWidth = dummyTextItemFour.implicitWidth;
-                                    //     }
-                                    //     width: longestTextWidth + 50
-                                    //     model: Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText)
-                                    //     // Layout.preferredWidth: 120
-                                    //     Layout.fillWidth: true
-                                    //     // Use the colored delegate
-                                    //     delegate: coloredItemDelegate
-                                    //     onModelChanged: updateLongestTextWidth()
-                                    //     onCurrentTextChanged: currentVariationTargetText.updateVariationTarget()
-                                    //     visible: model ? model.length > 0 : false // Enable only if there are tokens available
-                                    //     Text {
-                                    //         id: dummyTextItemFour
-                                    //         visible: false
-                                    //         font: tokenComboBoxFour.font
-                                    //     }
-                                    // }
-
                                         id: comboRow
 
                                         spacing: 5
 
                                         ComboBox {
-                                            // tokenComboBoxOne.model = Julia.get_tokens(locationComboBox.currentText);
-                                            // tokenComboBoxTwo.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText);
-                                            // tokenComboBoxThree.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText);
-                                            // tokenComboBoxFour.model = Julia.get_tokens(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText);
-                                            // currentVariationTargetText.updateVariationTarget(); // Update the target text
-
                                             id: locationComboBox
 
                                             property int longestTextWidth: 0
@@ -974,7 +738,6 @@ ApplicationWindow {
                                                 return ;
 
                                             // Skip updates if flag is false
-                                            // currentVariationTargetText.text = Julia.get_target_path(locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText, tokenComboBoxFour.currentText);
                                             var tokens = [locationComboBox.currentText];
                                             for (let i = 0; i < tokenComboBoxRepeater.count; ++i) {
                                                 let text = tokenComboBoxRepeater.itemAt(i).currentText;
@@ -1099,8 +862,6 @@ ApplicationWindow {
                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
                             enabled: currentVariationTargetText.text !== "" && variationValuesInput.text !== ""
                             onClicked: {
-                                // Call Julia function to create variation
-                                // Julia.create_variation(currentVariationTargetText.text, variationValuesInput.text, locationComboBox.currentText, tokenComboBoxOne.currentText, tokenComboBoxTwo.currentText, tokenComboBoxThree.currentText, tokenComboBoxFour.currentText);
                                 var tokens = [currentVariationTargetText.text, variationValuesInput.text];
                                 for (let i = 0; i < tokenComboBoxRepeater.count; ++i) {
                                     let text = tokenComboBoxRepeater.itemAt(i).currentText;
@@ -1226,29 +987,35 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 60
             color: guiproperties.color_bottom
+
             // Run Simulation
             Button {
-                // Julia.run_simulation();
-
                 id: runSimulationButton
+
+                property string disabledText: "Create inputs first..."
 
                 anchors.centerIn: parent
                 implicitHeight: 45
                 implicitWidth: 200
-
-                text: "Run Simulation"
+                text: enabled ? "Run Simulation" : disabledText
                 font.pixelSize: mainWindow.fontSizeOfLevel[1]
                 font.bold: true
-                enabled: true
+                enabled: false
                 onClicked: {
                     // Call Julia function to run the simulation
                     // Disable button to prevent multiple clicks
-                    runSimulationButton.enabled = false;
-                    runSimulationButton.text = "Running...";
-                    Qt.callLater(function() {
-                        Julia.run_simulation();
-                    });
+                    enabled = false;
+                    start_run_timer.start();
                 }
+            }
+
+            Timer {
+                id: start_run_timer
+
+                running: false
+                interval: 10 // 10 millisecond delay before running the simulation
+                repeat: false
+                onTriggered: Julia.run_simulation()
             }
 
         }
@@ -1258,10 +1025,7 @@ ApplicationWindow {
     JuliaSignals {
         signal simulationFinished()
 
-        onSimulationFinished: function() {
-            runSimulationButton.enabled = true;
-            runSimulationButton.text = "Run Simulation";
-        }
+        onSimulationFinished: runSimulationButton.enabled = true
     }
 
 }
