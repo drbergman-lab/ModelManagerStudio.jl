@@ -11,8 +11,14 @@ include("record.jl")
 global inputs
 global tokens_avs = Tuple[]
 
-function init_model_manager_gui(args::Vararg{AbstractString}; default=:ask)
-    if !studio_initialize_model_manager(args...; default=Symbol(default))
+"""
+    init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
+
+Internal function to initialize the Model Manager GUI with the specified arguments.
+Called by [`launch`](@ref).
+"""
+function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
+    if !studio_initialize_model_manager(args...; kwargs...)
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
 
@@ -34,6 +40,31 @@ function init_model_manager_gui(args::Vararg{AbstractString}; default=:ask)
     return loadqml(qml_file, guiproperties=random_color_scheme(), project_configuration_properties=create_project_configuration_properties())
 end
 
+"""
+    launch()
+    launch(path_to_project::AbstractString)
+    launch(data_dir::AbstractString, physicell_dir::AbstractString)
+
+Launch the Model Manager Studio GUI for a particular project.
+
+If no arguments are provided, it will initialize the Model Manager within the current working directory, i.e., using `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`.
+If a single argument is provided, it will use that as the base directory and append `data` and `PhysiCell` to it, i.e., `data_dir = "\$(path_to_project)/data"` and `physicell_dir = "\$(path_to_project)/PhysiCell"`.
+If two arguments are provided, they will be used as the `data_dir` and `physicell_dir`, respectively.
+
+The `reinit_policy` keyword argument can be used to specify how the Model Manager should handle reinitialization if the paths differ from the previously initialized paths.
+See [`ReinitPolicy`](@ref) for more options.
+String or Symbol values can be used for `reinit_policy`.
+
+# Examples
+```julia
+using ModelManagerStudio
+launch()  # Launches with default paths in the current directory, i.e., `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`
+launch("path/to/project")  # Launches with specified project path (will ask if paths differ)
+launch("path/to/data", "path/to/PhysiCell"; reinit_policy=:update)  # Launches with specified data and PhysiCell directories, updating if paths differ
+launch("path/to/data", "path/to/PhysiCell"; reinit_policy="keep")  # Launches with specified directories, keeping previous paths if they differ
+launch(; reinit_policy=ModelManagerStudio.ask)  # Launches with default paths, asking the user to confirm reinitialization if paths differ
+```
+"""
 function launch(args...; kwargs...)
     # Run the application
     e = init_model_manager_gui(args...; kwargs...)
@@ -41,11 +72,30 @@ function launch(args...; kwargs...)
     exec()
 end
 
-function studio_initialize_model_manager(args::Vararg{AbstractString}; default=:ask)
+"""
+    ReinitPolicy
+
+An enum to specify the reinitialization policy for the Model Manager.
+
+Uses the following values:
+- `ask`: Prompt the user to confirm reinitialization if paths differ.
+- `update`: Automatically reinitialize the Model Manager with new paths if they differ.
+- `keep`: Keep the existing paths and do not reinitialize.
+"""
+@enum ReinitPolicy ask update keep
+
+"""
+    studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_policy=ask)
+
+Internal function to initialize the Model Manager with the specified arguments.
+Called by [`init_model_manager_gui`](@ref).
+"""
+function studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_policy=ask)
     data_dir, physicell_dir = get_pcvct_paths(args...)
-    if default == :update || !pcvct.pcvct_globals.initialized
+    reinit_policy = reinit_policy isa ReinitPolicy ? reinit_policy : parse_reinit_policy(reinit_policy)
+    if reinit_policy == update || !pcvct.pcvct_globals.initialized
         initializeModelManager(physicell_dir, data_dir)
-    elseif default != :keep && length(args) == 0 && (pcvct.pcvct_globals.data_dir != data_dir || pcvct.pcvct_globals.physicell_dir != physicell_dir)
+    elseif reinit_policy != keep && length(args) == 0 && (pcvct.pcvct_globals.data_dir != data_dir || pcvct.pcvct_globals.physicell_dir != physicell_dir)
         msg = """
         WARNING: Model Manager was previously initialized with the following paths:
             Data Directory: $(pcvct.pcvct_globals.data_dir)
@@ -64,12 +114,38 @@ function studio_initialize_model_manager(args::Vararg{AbstractString}; default=:
         else
             println("Keeping previous paths and not reinitializing Model Manager.")
         end
-        println("To avoid this prompt in the future, you can use the `default` keyword argument to specify `:ask`, `:update`, or `:keep`.")
+        println("To avoid this prompt in the future, you can use the `reinit_policy` keyword argument to specify `:ask`, `:update`, or `:keep`.")
     end
 
     return pcvct.pcvct_globals.initialized
 end
 
+"""
+    parse_reinit_policy(policy::Symbol)
+    parse_reinit_policy(policy::AbstractString)
+
+Parse the reinitialization policy from a Symbol or String to a [`ReinitPolicy`](@ref) enum.
+"""
+function parse_reinit_policy(policy::Symbol)
+    if policy == :ask
+        return ask
+    elseif policy == :update
+        return update
+    elseif policy == :keep
+        return keep
+    else
+        throw(ArgumentError("Invalid reinit_policy: $policy. Must be one of :ask, :update, or :keep."))
+    end
+end
+
+parse_reinit_policy(policy::AbstractString) = parse_reinit_policy(Symbol(policy))
+
+"""
+    get_pcvct_paths(args::Vararg{AbstractString})
+
+Get the PhysiCell and data directories from the provided arguments.
+See [`launch`](@ref) for details on how the arguments are interpreted.
+"""
 function get_pcvct_paths(args::Vararg{AbstractString})
     @assert length(args) <= 2 "Expected at most 2 arguments, got $(length(args))"
     if length(args) == 0
