@@ -8,7 +8,7 @@ makedocs(;
     authors="Daniel Bergman <danielrbergman@gmail.com> and contributors",
     sitename="ModelManagerStudio.jl",
     format=Documenter.HTML(;
-        canonical="https://drbergman.github.io/ModelManagerStudio.jl",
+        canonical="https://drbergman-lab.github.io/ModelManagerStudio.jl",
         edit_link="development",
         assets=String[],
     ),
@@ -18,6 +18,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/drbergman/ModelManagerStudio.jl",
+    repo="github.com/drbergman-lab/ModelManagerStudio.jl",
     devbranch="development",
 )

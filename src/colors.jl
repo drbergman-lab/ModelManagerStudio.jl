@@ -1,6 +1,6 @@
 
-function random_color_scheme()
-    token = "STUDIO_COLOR_TOKEN" in keys(ENV) ? ENV["STUDIO_COLOR_TOKEN"] : rand(["dodgers", "michigan", "orioles", "ravens", "angels", "umb", "hopkins", "csulb", "uci"])
+function color_scheme()
+    token = "STUDIO_COLOR_TOKEN" in keys(ENV) ? ENV["STUDIO_COLOR_TOKEN"] : rand(random_color_scheme_list())
     model_manager_studio_info("Using color scheme: $token")
     if token == "dodgers"
         colors = ["#005A9C", "#EF3E42", "#A5ACAF"]
@@ -23,3 +23,5 @@ function random_color_scheme()
     end
     return JuliaPropertyMap("color_top" => colors[1], "color_bottom" => colors[2], "color_button" => colors[3])
 end
+
+random_color_scheme_list() = ["dodgers", "michigan", "orioles", "ravens", "angels", "umb", "hopkins", "csulb", "uci"]
