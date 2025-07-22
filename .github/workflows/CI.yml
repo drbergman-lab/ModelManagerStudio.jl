@@ -30,16 +30,25 @@ jobs:
           - 'lts'
           - '1'
           - 'pre'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
+        os: ["ubuntu-latest"]
+        arch: ["x64"]
+        shell: ["bash"]
+        compiler: ["g++"]
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
+          
+      - name: Set environment variable PHYSICELL_CPP
+        run: echo "PHYSICELL_CPP=${{ matrix.compiler }}" >> $GITHUB_ENV
+        
       - uses: julia-actions/cache@v2
       - name: Add PCVCTRegistry
         run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman/PCVCTRegistry.git"))'
@@ -65,6 +74,10 @@ jobs:
             
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        env:
+          PCVCT_NUM_PARALLEL_SIMS: 8
+          PCVCT_PUBLIC_REPO_AUTH: ${{ secrets.PUBLIC_REPO_AUTH }}
+          PHYSICELL_CPP: ${{ matrix.compiler }} # maybe necessary for windows??
       - uses: julia-actions/julia-processcoverage@v1
         with:
           directories: src,assets

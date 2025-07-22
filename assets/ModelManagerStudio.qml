@@ -19,72 +19,6 @@ ApplicationWindow {
         onActivated: mainWindow.close()
     }
 
-    Component {
-        id: locationComponent
-
-        Item {
-            // Use Item as the root to properly handle layout
-            id: locationItem
-
-            property int level: 2 // level of the item, used for font size
-            property string labelText: "Default Text"
-            property string location: "default_location"
-            property bool isVaried: false
-            property bool isRequired: false
-            property alias comboBox: locationComboBox
-            property alias label: labelTextItem // These layout properties will be applied when used in a Layout
-
-            Layout.alignment: Qt.AlignCenter
-            width: rect.width
-            height: rect.height
-
-            // The actual rectangle with background color
-            Rectangle {
-                id: rect
-
-                width: columnLayout.implicitWidth + 10
-                height: columnLayout.implicitHeight + 10 // padding/margin
-                color: locationItem.isVaried ? "#d0e8ff" : "transparent"
-                radius: 4
-                border.width: 1
-                border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
-
-                ColumnLayout {
-                    id: columnLayout
-
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Text {
-                        id: labelTextItem
-
-                        text: labelText
-                        font.bold: true
-                        font.pixelSize: mainWindow.fontSizeOfLevel[level]
-                    }
-
-                    // ComboBox for selecting folder locations
-                    ComboBox {
-                        id: locationComboBox
-
-                        // Function to update folders when location or variation state changes
-                        function updateFolders() {
-                            model = Julia.get_folders(locationItem.location, locationItem.isRequired);
-                        }
-
-                        Layout.alignment: Qt.AlignBottom
-                        Layout.preferredWidth: 180
-                        font.pixelSize: mainWindow.fontSizeOfLevel[level]
-                    }
-
-                }
-
-            }
-
-        }
-
-    }
-
     SystemPalette {
         id: syscolors
 
@@ -168,6 +102,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
+            // Inputs tab
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -177,6 +112,79 @@ ApplicationWindow {
                     spacing: 10 // Reduced spacing for more compact vertical layout
                     anchors.centerIn: parent
                     anchors.fill: parent
+
+                    Component {
+                        id: locationComponent
+
+                        Item {
+                            // Use Item as the root to properly handle layout
+                            id: locationItem
+
+                            property int level: 2 // level of the item, used for font size
+                            property string labelText: "Default Text"
+                            property string location: "default_location"
+                            property bool isVaried: false
+                            property bool isRequired: false
+                            property alias comboBox: locationComboBox
+                            property alias label: labelTextItem // These layout properties will be applied when used in a Layout
+
+                            signal comboChanged(string newText)
+
+                            Layout.alignment: Qt.AlignCenter
+                            width: rect.width
+                            height: rect.height
+
+                            // The actual rectangle with background color
+                            Rectangle {
+                                id: rect
+
+                                width: columnLayout.implicitWidth + 10
+                                height: columnLayout.implicitHeight + 10 // padding/margin
+                                color: locationItem.isVaried ? "#d0e8ff" : "transparent"
+                                radius: 4
+                                border.width: 1
+                                border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
+
+                                ColumnLayout {
+                                    id: columnLayout
+
+                                    anchors.centerIn: parent
+                                    spacing: 2
+
+                                    Text {
+                                        id: labelTextItem
+
+                                        text: labelText
+                                        font.bold: true
+                                        font.pixelSize: mainWindow.fontSizeOfLevel[level]
+                                    }
+
+                                    // ComboBox for selecting folder locations
+                                    ComboBox {
+                                        id: locationComboBox
+
+                                        // Function to update folders when location or variation state changes
+                                        function updateFolders() {
+                                            model = Julia.get_folders(locationItem.location, locationItem.isRequired);
+                                        }
+
+                                        onCurrentTextChanged: {
+                                            // Update the varied state when the current text changes
+                                            locationItem.isVaried = Julia.is_varied_location(locationItem.location, locationItem.comboBox.currentText);
+                                            locationItem.comboChanged(currentText);
+                                        }
+                                        Layout.alignment: Qt.AlignBottom
+                                        Layout.preferredWidth: 180
+                                        font.pixelSize: mainWindow.fontSizeOfLevel[level]
+                                    }
+
+                                }
+
+                            }
+
+                        }
+
+                    }
 
                     // Required Locations
                     Text {
@@ -199,17 +207,20 @@ ApplicationWindow {
                         Repeater {
                             id: requiredLocationsRepeater
 
-                            model: project_configuration_properties.req_locations
+                            model: reqLocModel
 
                             delegate: Loader {
                                 id: requiredLocationLoader
 
                                 sourceComponent: locationComponent
                                 onLoaded: {
-                                    item.labelText = Julia.location_label(modelData);
-                                    item.location = modelData; // Convert to a suitable location name
-                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.labelText = labelText;
+                                    item.location = location; // Convert to a suitable location name
+                                    item.isVaried = false; // Set varied state
                                     item.isRequired = true; // Set required state
+                                    item.comboChanged.connect(function(newText) {
+                                        folder = newText; // Update the folder variable
+                                    });
                                     item.comboBox.updateFolders(); // Update folders in the combo box
                                 }
                             }
@@ -239,17 +250,20 @@ ApplicationWindow {
                         Repeater {
                             id: optionalLocationsRepeater
 
-                            model: project_configuration_properties.opt_locations
+                            model: optLocModel
 
                             delegate: Loader {
                                 id: optionalLocationLoader
 
                                 sourceComponent: locationComponent
                                 onLoaded: {
-                                    item.labelText = Julia.location_label(modelData);
-                                    item.location = modelData; // Convert to a suitable location name
-                                    item.isVaried = Julia.is_varied_location(modelData); // Set varied state
+                                    item.labelText = labelText;
+                                    item.location = location; // Convert to a suitable location name
+                                    item.isVaried = false; // Set varied state
                                     item.isRequired = false; // Set required state
+                                    item.comboChanged.connect(function(newText) {
+                                        folder = newText; // Update the folder variable
+                                    });
                                     item.comboBox.updateFolders(); // Update folders in the combo box
                                 }
                             }
@@ -267,17 +281,14 @@ ApplicationWindow {
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
                         onClicked: {
                             // Set input folders in Julia
-                            var tokens = [];
-                            for (let i = 0; i < requiredLocationsRepeater.count; ++i) tokens.push(requiredLocationsRepeater.itemAt(i).item.comboBox.currentText)
-                            for (let i = 0; i < optionalLocationsRepeater.count; ++i) tokens.push(optionalLocationsRepeater.itemAt(i).item.comboBox.currentText)
-                            Julia.set_input_folders.apply(Julia, tokens);
+                            Julia.set_input_folders();
                             // Update the display to show current selections
                             requiredLocationsDisplay.updateFolderDisplay();
                             optionalLocationsDisplay.updateFolderDisplay();
                             // Hide the placeholder text and show the inputs display
                             inputsPlaceholderText.visible = false;
                             inputsDisplay.visible = true;
-                            locationComboBox.model = Julia.get_varied_locations();
+                            variedLocationComboBox.model = Julia.get_varied_locations();
                             currentVariationTargetText.updateVariationTarget(); // Update the target text
                             if (runSimulationButton.enabled === false) {
                                 runSimulationButton.enabled = true; // Enable the run simulation button
@@ -337,13 +348,15 @@ ApplicationWindow {
                                     // Function to update the text values with current selections
                                     function updateFolderDisplay() {
                                         // The Repeater will handle displaying each item
-                                        requiredFoldersRepeater.model = [{
-                                            "name": "Config folder",
-                                            "value": Julia.get_input_folder("config")
-                                        }, {
-                                            "name": "Custom code folder",
-                                            "value": Julia.get_input_folder("custom_code")
-                                        }];
+                                        let temp_mod = [];
+                                        for (let i = 0; i < requiredLocationsRepeater.count; ++i) {
+                                            let item = requiredLocationsRepeater.itemAt(i).item;
+                                            temp_mod.push({
+                                                "name": item.labelText,
+                                                "value": Julia.get_input_folder(item.location)
+                                            });
+                                        }
+                                        requiredFoldersRepeater.model = temp_mod;
                                     }
 
                                     Layout.alignment: Qt.AlignTop
@@ -390,25 +403,15 @@ ApplicationWindow {
 
                                     // This function will force the repeater to reevaluate its values
                                     function updateFolderDisplay() {
-                                        optionalFoldersRepeater.model = [{
-                                            "name": "Rules folder",
-                                            "value": Julia.get_input_folder("rulesets_collection")
-                                        }, {
-                                            "name": "Intracellular folder",
-                                            "value": Julia.get_input_folder("intracellular")
-                                        }, {
-                                            "name": "IC Cell folder",
-                                            "value": Julia.get_input_folder("ic_cell")
-                                        }, {
-                                            "name": "IC ECM folder",
-                                            "value": Julia.get_input_folder("ic_ecm")
-                                        }, {
-                                            "name": "IC Substrate folder",
-                                            "value": Julia.get_input_folder("ic_substrate")
-                                        }, {
-                                            "name": "IC DC folder",
-                                            "value": Julia.get_input_folder("ic_dc")
-                                        }];
+                                        let temp_mod = [];
+                                        for (let i = 0; i < optionalLocationsRepeater.count; ++i) {
+                                            let item = optionalLocationsRepeater.itemAt(i).item;
+                                            temp_mod.push({
+                                                "name": item.labelText,
+                                                "value": Julia.get_input_folder(item.location)
+                                            });
+                                        }
+                                        optionalFoldersRepeater.model = temp_mod;
                                     }
 
                                     Layout.alignment: Qt.AlignTop
@@ -461,6 +464,7 @@ ApplicationWindow {
 
             }
 
+            // Variations tab
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -581,7 +585,7 @@ ApplicationWindow {
                                         spacing: 5
 
                                         ComboBox {
-                                            id: locationComboBox
+                                            id: variedLocationComboBox
 
                                             property int longestTextWidth: 0
 
@@ -606,14 +610,14 @@ ApplicationWindow {
                                             onCurrentTextChanged: {
                                                 // Update the token combo boxes based on the selected location
                                                 // Prevent updates while changing location
-                                                tokenComboBoxRepeater.itemAt(0).model = Julia.get_next_model(locationComboBox.currentText);
+                                                tokenComboBoxRepeater.itemAt(0).model = Julia.get_next_model(variedLocationComboBox.currentText);
                                             }
 
                                             Text {
                                                 id: dummyTextItemLocation
 
                                                 visible: false
-                                                font: locationComboBox.font
+                                                font: variedLocationComboBox.font
                                             }
 
                                         }
@@ -638,7 +642,7 @@ ApplicationWindow {
                                                 }
 
                                                 function updateNextComboBox() {
-                                                    var tokens = [locationComboBox.currentText];
+                                                    var tokens = [variedLocationComboBox.currentText];
                                                     for (let i = 0; i <= index; ++i) {
                                                         tokens.push(tokenComboBoxRepeater.itemAt(i).currentText);
                                                     }
@@ -738,7 +742,7 @@ ApplicationWindow {
                                                 return ;
 
                                             // Skip updates if flag is false
-                                            var tokens = [locationComboBox.currentText];
+                                            var tokens = [variedLocationComboBox.currentText];
                                             for (let i = 0; i < tokenComboBoxRepeater.count; ++i) {
                                                 let text = tokenComboBoxRepeater.itemAt(i).currentText;
                                                 if (text === "")
@@ -983,6 +987,7 @@ ApplicationWindow {
 
         }
 
+        // Bottom bar with Run Simulation button
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 60
@@ -1026,6 +1031,13 @@ ApplicationWindow {
         signal simulationFinished()
 
         onSimulationFinished: runSimulationButton.enabled = true
+    }
+
+    Timer {
+        id: testingTimer
+
+        running: testing.testing
+        onTriggered: Qt.exit(0)
     }
 
 }
