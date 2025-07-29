@@ -1,7 +1,7 @@
 module ModelManagerStudio
 
 # Write your package code here.
-using QML, pcvct, LightXML, Compat, Distributions
+using QML, PhysiCellModelManager, LightXML, Compat, Distributions
 
 @compat public launch
 
@@ -21,12 +21,6 @@ Called by [`launch`](@ref).
 """
 function init_model_manager_gui(args::Vararg{AbstractString}; testing::Bool=false, kwargs...)
     if !studio_initialize_model_manager(args...; kwargs...)
-        throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
-    end
-
-    if !pcvct.pcvct_globals.initialized
-        initializeModelManager()
-
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
 
@@ -93,15 +87,15 @@ Internal function to initialize the Model Manager with the specified arguments.
 Called by [`init_model_manager_gui`](@ref).
 """
 function studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_policy=ask)
-    data_dir, physicell_dir = get_pcvct_paths(args...)
+    data_dir, physicell_dir = get_pcmm_paths(args...)
     reinit_policy = reinit_policy isa ReinitPolicy ? reinit_policy : parse_reinit_policy(reinit_policy)
-    if reinit_policy == update || !pcvct.pcvct_globals.initialized
+    if reinit_policy == update || !PhysiCellModelManager.pcmm_globals.initialized
         initializeModelManager(physicell_dir, data_dir)
-    elseif reinit_policy != keep && length(args) == 0 && (pcvct.pcvct_globals.data_dir != data_dir || pcvct.pcvct_globals.physicell_dir != physicell_dir)
+    elseif reinit_policy != keep && length(args) == 0 && (PhysiCellModelManager.dataDir() != data_dir || PhysiCellModelManager.physicellDir() != physicell_dir)
         msg = """
         WARNING: Model Manager was previously initialized with the following paths:
-            Data Directory: $(pcvct.pcvct_globals.data_dir)
-            PhysiCell Directory: $(pcvct.pcvct_globals.physi_cell_dir)
+            Data Directory: $(PhysiCellModelManager.dataDir())
+            PhysiCell Directory: $(PhysiCellModelManager.physicellDir())
 
         You have since changed directories and are now trying to initialize with:
             Data Directory: $data_dir
@@ -119,7 +113,7 @@ function studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_po
         println("To avoid this prompt in the future, you can use the `reinit_policy` keyword argument to specify `:ask`, `:update`, or `:keep`.")
     end
 
-    return pcvct.pcvct_globals.initialized
+    return PhysiCellModelManager.pcmm_globals.initialized
 end
 
 """
@@ -143,12 +137,12 @@ end
 parse_reinit_policy(policy::AbstractString) = parse_reinit_policy(Symbol(policy))
 
 """
-    get_pcvct_paths(args::Vararg{AbstractString})
+    get_pcmm_paths(args::Vararg{AbstractString})
 
 Get the PhysiCell and data directories from the provided arguments.
 See [`launch`](@ref) for details on how the arguments are interpreted.
 """
-function get_pcvct_paths(args::Vararg{AbstractString})
+function get_pcmm_paths(args::Vararg{AbstractString})
     @assert length(args) <= 2 "Expected at most 2 arguments, got $(length(args))"
     if length(args) == 0
         data_dir = "data"
@@ -164,7 +158,7 @@ end
 
 function get_folders(location::AbstractString, required::Bool)
     out = required ? String[] : String["--NONE--"]
-    append!(out, location |> Symbol |> pcvct.locationPath |> readdir)
+    append!(out, location |> Symbol |> PhysiCellModelManager.locationPath |> readdir)
     return out
 end
 
@@ -195,9 +189,9 @@ end
 
 function get_substrate_names()
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    microenvironment_element = pcvct.retrieveElement(xml_doc, ["microenvironment_setup"])
+    microenvironment_element = PhysiCellModelManager.retrieveElement(xml_doc, ["microenvironment_setup"])
     substrate_names = String[]
     for ce in get_elements_by_tagname(microenvironment_element, "variable")
         push!(substrate_names, attribute(ce, "name"))
@@ -207,9 +201,9 @@ end
 
 function get_cell_type_names()
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    cell_types_element = pcvct.retrieveElement(xml_doc, ["cell_definitions"])
+    cell_types_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions"])
     cell_type_names = String[]
     for ce in get_elements_by_tagname(cell_types_element, "cell_definition")
         push!(cell_type_names, attribute(ce, "name"))
@@ -219,31 +213,31 @@ end
 
 function get_custom_tags()
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    return [name(ce) for ce in (pcvct.retrieveElement(xml_doc, ["cell_definitions", "cell_definition", "custom_data"]) |> child_elements)]
+    return [name(ce) for ce in (PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions", "cell_definition", "custom_data"]) |> child_elements)]
 end
 
 function get_user_parameter_names()
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    user_parameters_element = pcvct.retrieveElement(xml_doc, ["user_parameters"])
+    user_parameters_element = PhysiCellModelManager.retrieveElement(xml_doc, ["user_parameters"])
     return [name(ce) for ce in child_elements(user_parameters_element)]
 end
 
 function get_cycle_model_phase_tag(cell_type::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    cycle_model_element = pcvct.retrieveElement(xml_doc, pcvct.cyclePath(cell_type))
+    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type))
     is_rate = find_element(cycle_model_element, "phase_durations") |> isnothing
     return is_rate ? "rate" : "duration"
 end
 
 function get_cycle_model_phase_indexes(cell_type::AbstractString, cycle_model_phase_tag::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
     if cycle_model_phase_tag == "rate"
         tag = "phase_transition_rates"
@@ -252,15 +246,15 @@ function get_cycle_model_phase_indexes(cell_type::AbstractString, cycle_model_ph
         tag = "phase_durations"
         attr_name = "index"
     end
-    cycle_model_element = pcvct.retrieveElement(xml_doc, pcvct.cyclePath(cell_type, tag))
+    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type, tag))
     return [attribute(ce, attr_name) for ce in child_elements(cycle_model_element)]
 end
 
 function get_death_model_phase_tag(cell_type::AbstractString, death_model::Symbol)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    death_model_element = pcvct.retrieveElement(xml_doc, pcvct.deathPath(cell_type, "model:name:$(death_model)"))
+    death_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.deathPath(cell_type, "model:name:$(death_model)"))
     is_rate = find_element(death_model_element, "phase_durations") |> isnothing
     base_name = is_rate ? "transition_rate" : "duration"
     if death_model == :apoptosis
@@ -272,9 +266,9 @@ end
 
 function get_initial_parameter_distribution_behaviors(cell_type::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    initial_parameter_distribution_element = pcvct.retrieveElement(xml_doc, pcvct.cellDefinitionPath(cell_type, "initial_parameter_distributions"))
+    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions"))
     behaviors = String[]
     for ce in get_elements_by_tagname(initial_parameter_distribution_element, "distribution")
         ce_child = find_element(ce, "behavior")
@@ -285,9 +279,9 @@ end
 
 function get_initial_parameter_distribution_behavior_tags(cell_type::AbstractString, behavior::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:config])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
     xml_doc = parse_file(path_to_xml)
-    initial_parameter_distribution_element = pcvct.retrieveElement(xml_doc, pcvct.cellDefinitionPath(cell_type, "initial_parameter_distributions", "distribution::behavior:$(behavior)"))
+    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions", "distribution::behavior:$(behavior)"))
     return [n for n in (initial_parameter_distribution_element |> child_elements .|> name) if n != "behavior"]
 end
 
@@ -410,33 +404,33 @@ end
 
 function get_ruled_behaviors(cell_type::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:rulesets_collection])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
     xml_doc = parse_file(path_to_xml)
-    rules_element = pcvct.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"])
+    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"])
     return [attribute(ce, "name") for ce in get_elements_by_tagname(rules_element, "behavior")]
 end
 
 function get_next_rule_tags(tokens::Vararg{AbstractString})
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:rulesets_collection])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
     xml_doc = parse_file(path_to_xml)
-    rules_element = pcvct.retrieveElement(xml_doc, ["behavior_ruleset:name:$(tokens[1])"; "behavior:name:$(tokens[2])"; tokens[3:end]...])
+    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(tokens[1])"; "behavior:name:$(tokens[2])"; tokens[3:end]...])
     return get_next_xml_path_elements(rules_element, ["name"])
 end
 
 function get_patch_types(cell_type::AbstractString)
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:ic_cell])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
     xml_doc = parse_file(path_to_xml)
-    ic_element = pcvct.retrieveElement(xml_doc, ["cell_patches:name:$(cell_type)"])
+    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(cell_type)"])
     return [attribute(ce, "type") for ce in get_elements_by_tagname(ic_element, "patch_collection")]
 end
 
 function get_next_ic_cell_tags(tokens::Vararg{AbstractString})
     global inputs
-    path_to_xml = pcvct.prepareBaseFile(inputs[:ic_cell])
+    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
     xml_doc = parse_file(path_to_xml)
-    ic_element = pcvct.retrieveElement(xml_doc, ["cell_patches:name:$(tokens[1])"; "patch_collection:type:$(tokens[2])"; String.(tokens[3:end])...])
+    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(tokens[1])"; "patch_collection:type:$(tokens[2])"; String.(tokens[3:end])...])
     return get_next_xml_path_elements(ic_element, ["type", "ID"])
 end
 
@@ -491,7 +485,7 @@ function get_target_path(location::AbstractString, tokens::Vararg{AbstractString
     if location == "config"
         return get_config_path(tokens...)
     elseif location == "rulesets_collection"
-        return rulePath(tokens...) |> pcvct.columnName
+        return rulePath(tokens...) |> PhysiCellModelManager.columnName
     elseif location == "ic_cell"
         tokens = [String.(tokens)...]
         tokens[3] = split(tokens[3], ":")[end] # just get the ID part since icCellsPath just needs the ID (this gui is showing the ID to help make it make sense for the user)
@@ -501,11 +495,11 @@ function get_target_path(location::AbstractString, tokens::Vararg{AbstractString
             tokens[6] = split(tokens[6], ":")[end] # just get the carveout patch ID
             popat!(tokens, 4) # remove 'carveout_patches' token since icCellsPath doesn't need it
         end
-        return icCellsPath(String.(tokens)...) |> pcvct.columnName
+        return icCellsPath(String.(tokens)...) |> PhysiCellModelManager.columnName
     elseif location == "ic_ecm"
-        return icECMPath(tokens...) |> pcvct.columnName
+        return icECMPath(tokens...) |> PhysiCellModelManager.columnName
     else
-        return [t for t in String.(tokens) if !isempty(t)] |> pcvct.columnName
+        return [t for t in String.(tokens) if !isempty(t)] |> PhysiCellModelManager.columnName
     end
 end
 
@@ -520,7 +514,7 @@ function get_config_path(tokens::Vararg{AbstractString})
     end
     s = "INVALID PATH"
     try
-        s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> pcvct.columnName
+        s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> PhysiCellModelManager.columnName
     catch e
         model_manager_studio_warn("Invalid configuration path:\n\t$(join(tokens, " > "))")
         model_manager_studio_debug("Error details: $(e.msg)")
@@ -531,7 +525,7 @@ end
 function create_variation(target::AbstractString, vals::AbstractString, tokens::Vararg{AbstractString})
     global tokens_avs
     tokens = [t for t in String.(tokens) if !isempty(t)]
-    target = target |> String |> pcvct.columnNameToXMLPath
+    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
     try
         vals = vals |> Meta.parse |> eval
     catch e
@@ -561,13 +555,13 @@ function get_current_variations()
 end
 
 function variation_exists(target::AbstractString)
-    target = target |> String |> pcvct.columnNameToXMLPath
+    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
     return find_variation_index(target) |> !isnothing
 end
 
 function find_variation_index(target::Vector{<:AbstractString})
     global tokens_avs
-    return findfirst(tokens_av -> pcvct.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
+    return findfirst(tokens_av -> PhysiCellModelManager.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
 end
 
 function run_simulation()
@@ -603,7 +597,7 @@ function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
 end
 
 function create_project_configuration_properties()
-    pl = pcvct.projectLocations()
+    pl = PhysiCellModelManager.projectLocations()
     req_locs = [pl.required...]
     opt_locs = setdiff(pl.all, req_locs)
 
@@ -628,14 +622,14 @@ function location_label(location::AbstractString)
     return uppercasefirst(out) * " folder"
 end
 
-is_varied_location(location::AbstractString) = Symbol(location) ∈ pcvct.projectLocations().varied
+is_varied_location(location::AbstractString) = Symbol(location) ∈ PhysiCellModelManager.projectLocations().varied
 
 function is_varied_location(location::AbstractString, folder::AbstractString)
     folder = String(folder)
     if isempty(folder) || folder == "--NONE--"
         return false
     end
-    input_folder = pcvct.InputFolder(Symbol(location), folder)
+    input_folder = PhysiCellModelManager.InputFolder(Symbol(location), folder)
     return input_folder.varied
 end
 
@@ -647,7 +641,7 @@ end
 
 function required_input_folders()
     global current_required_locations
-    pl = pcvct.projectLocations()
+    pl = PhysiCellModelManager.projectLocations()
     current_required_locations = MMSFolder[]
     for loc in pl.required
         loc_str = String(loc)
@@ -660,7 +654,7 @@ end
 
 function optional_input_folders()
     global current_optional_locations
-    pl = pcvct.projectLocations()
+    pl = PhysiCellModelManager.projectLocations()
     current_optional_locations = MMSFolder[]
     for loc in setdiff(pl.all, pl.required)
         loc_str = String(loc)
