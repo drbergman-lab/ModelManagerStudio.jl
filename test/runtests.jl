@@ -1,4 +1,4 @@
-using ModelManagerStudio, pcvct, Test, QML
+using ModelManagerStudio, PhysiCellModelManager, Test, QML
 
 createProject()
 
@@ -10,7 +10,7 @@ createProject()
         end
 
         for args in [["."], [joinpath(".", "data"), joinpath(".", "PhysiCell")]]
-            data_dir, physicell_dir = ModelManagerStudio.get_pcvct_paths(args...)
+            data_dir, physicell_dir = ModelManagerStudio.get_pcmm_paths(args...)
             @test isdir(data_dir)
             @test isdir(physicell_dir)
             @test abspath(data_dir) == abspath(joinpath(".", "data"))

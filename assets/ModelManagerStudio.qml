@@ -8,7 +8,7 @@ ApplicationWindow {
 
     property var fontSizeOfLevel: [20, 18, 14, 12, 10]
 
-    title: "PCVCT GUI"
+    title: "PhysiCellModelManager.jl GUI"
     width: 800
     height: 600
     visible: true
