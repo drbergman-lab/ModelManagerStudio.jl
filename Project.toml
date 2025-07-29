@@ -1,24 +1,24 @@
 name = "ModelManagerStudio"
 uuid = "ec939353-8009-4f22-a497-1a1b0ca06ccd"
 authors = ["Daniel Bergman <danielrbergman@gmail.com> and contributors"]
-version = "0.0.6"
+version = "0.0.7"
 
 [deps]
 Compat = "34da2185-b29b-5c13-b0c7-acf172513d20"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 LightXML = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
+PhysiCellModelManager = "7582d1aa-5e58-4d65-a123-4418a61a2644"
 QML = "2db162a6-7e43-52c3-8d84-290c1c42d82a"
-pcvct = "3c374bc7-7384-4f83-8ca0-87b8c727e6ff"
 
 [compat]
 Compat = "4.16.0"
 Dates = "1"
 Distributions = "0.25.120"
 LightXML = "0.9.1"
+PhysiCellModelManager = "0.1"
 QML = "0.9.2, 0.10"
 julia = "1.11"
-pcvct = "0.0.28"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

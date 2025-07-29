@@ -4,7 +4,7 @@ global path_to_record::String = ""
 global last_record::Symbol = :none
 
 function initialize_record()
-    global path_to_record
+    global path_to_record, last_record
     mms_record_dir = "mms_records"
     isdir(mms_record_dir) || mkdir(mms_record_dir)
     path_base() = joinpath(mms_record_dir, Dates.format(now(), "yyyy-mm-dd_HH-MM"))
@@ -25,18 +25,18 @@ function initialize_record()
     #
     # Date created: $(current_time)
 
-    using pcvct, Distributions
-    initializeModelManager(\"$(pcvct.pcvct_globals.physicell_dir)\", \"$(pcvct.pcvct_globals.data_dir)\")\n
+    using PhysiCellModelManager, Distributions
+    initializeModelManager(\"$(PhysiCellModelManager.physicellDir())\", \"$(PhysiCellModelManager.dataDir())\")\n
     """
     open(path_to_record, "w") do file
         write(file, msg)
     end
-    global last_record = :initialize
+    last_record = :initialize
 end
 
 function record_inputs()
     global path_to_record, last_record, inputs
-    pl = pcvct.projectLocations()
+    pl = PhysiCellModelManager.projectLocations()
     required_args = join(["\"$(inputs[location].folder)\"" for location in pl.required], ", ")
     included_optional_locs = filter(location -> !isempty(inputs[location].folder), setdiff(pl.all, pl.required))
 
@@ -66,7 +66,7 @@ function record_variations()
     for token_av in tokens_avs
         avs_text *= """
 
-        xml_path = $(pcvct.variationTarget(token_av[2]).xml_path)
+        xml_path = $(PhysiCellModelManager.variationTarget(token_av[2]).xml_path)
         val = $(value_string(token_av[2]))
         push!(avs, ElementaryVariation(xml_path, val))
         """
@@ -101,7 +101,7 @@ function record_run()
     last_record = :run
 end
 
-value_string(dv::DiscreteVariation) = pcvct.variationValues(dv)
+value_string(dv::DiscreteVariation) = PhysiCellModelManager.variationValues(dv)
 
 function value_string(dv::DistributedVariation)
     d = dv.distribution
