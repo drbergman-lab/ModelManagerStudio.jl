@@ -7,11 +7,39 @@ using QML, PhysiCellModelManager, LightXML, Compat, Distributions
 
 include("colors.jl")
 include("record.jl")
+VERSION >= v"1.11" && include("main.jl")
 
 global current_required_locations
 global current_optional_locations
 global inputs
 global tokens_avs = Tuple[]
+
+
+"""
+    launch()
+    launch(path_to_project::AbstractString)
+    launch(physicell_dir::AbstractString, data_dir::AbstractString)
+
+Launch the Model Manager Studio GUI for a particular project.
+
+If no arguments are provided, it will initialize the Model Manager within the current working directory, i.e., using `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`.
+If a single argument is provided, it will use that as the base directory and append `data` and `PhysiCell` to it, i.e., `data_dir = "\$(path_to_project)/data"` and `physicell_dir = "\$(path_to_project)/PhysiCell"`.
+If two arguments are provided, they will be used as the `physicell_dir` and `data_dir`, respectively.
+
+# Examples
+```julia
+using ModelManagerStudio
+launch()  # Launches with default paths in the current directory, i.e., `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`
+launch("path/to/project")  # Launches with specified project path (will ask if paths differ)
+launch("path/to/PhysiCell", "path/to/data")  # Launches with specified PhysiCell and data directories
+```
+"""
+function launch(args...; kwargs...)
+    # Run the application
+    _ = init_model_manager_gui(args...; kwargs...)
+    println("Launching Model Manager Studio...")
+    exec()
+end
 
 """
     init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
@@ -37,104 +65,16 @@ function init_model_manager_gui(args::Vararg{AbstractString}; testing::Bool=fals
 end
 
 """
-    launch()
-    launch(path_to_project::AbstractString)
-    launch(data_dir::AbstractString, physicell_dir::AbstractString)
-
-Launch the Model Manager Studio GUI for a particular project.
-
-If no arguments are provided, it will initialize the Model Manager within the current working directory, i.e., using `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`.
-If a single argument is provided, it will use that as the base directory and append `data` and `PhysiCell` to it, i.e., `data_dir = "\$(path_to_project)/data"` and `physicell_dir = "\$(path_to_project)/PhysiCell"`.
-If two arguments are provided, they will be used as the `data_dir` and `physicell_dir`, respectively.
-
-The `reinit_policy` keyword argument can be used to specify how the Model Manager should handle reinitialization if the paths differ from the previously initialized paths.
-See [`ReinitPolicy`](@ref) for more options.
-String or Symbol values can be used for `reinit_policy`.
-
-# Examples
-```julia
-using ModelManagerStudio
-launch()  # Launches with default paths in the current directory, i.e., `data_dir = "./data"` and `physicell_dir = "./PhysiCell"`
-launch("path/to/project")  # Launches with specified project path (will ask if paths differ)
-launch("path/to/data", "path/to/PhysiCell"; reinit_policy=:update)  # Launches with specified data and PhysiCell directories, updating if paths differ
-launch("path/to/data", "path/to/PhysiCell"; reinit_policy="keep")  # Launches with specified directories, keeping previous paths if they differ
-launch(; reinit_policy=ModelManagerStudio.ask)  # Launches with default paths, asking the user to confirm reinitialization if paths differ
-```
-"""
-function launch(args...; kwargs...)
-    # Run the application
-    e = init_model_manager_gui(args...; kwargs...)
-    println("Launching Model Manager Studio...")
-    exec()
-end
-
-"""
-    ReinitPolicy
-
-An enum to specify the reinitialization policy for the Model Manager.
-
-Uses the following values:
-- `ask`: Prompt the user to confirm reinitialization if paths differ.
-- `update`: Automatically reinitialize the Model Manager with new paths if they differ.
-- `keep`: Keep the existing paths and do not reinitialize.
-"""
-@enum ReinitPolicy ask update keep
-
-"""
-    studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_policy=ask)
+    studio_initialize_model_manager(args::Vararg{AbstractString})
 
 Internal function to initialize the Model Manager with the specified arguments.
 Called by [`init_model_manager_gui`](@ref).
 """
-function studio_initialize_model_manager(args::Vararg{AbstractString}; reinit_policy=ask)
-    data_dir, physicell_dir = get_pcmm_paths(args...)
-    reinit_policy = reinit_policy isa ReinitPolicy ? reinit_policy : parse_reinit_policy(reinit_policy)
-    if reinit_policy == update || !PhysiCellModelManager.pcmm_globals.initialized
-        initializeModelManager(physicell_dir, data_dir)
-    elseif reinit_policy != keep && length(args) == 0 && (PhysiCellModelManager.dataDir() != data_dir || PhysiCellModelManager.physicellDir() != physicell_dir)
-        msg = """
-        WARNING: Model Manager was previously initialized with the following paths:
-            Data Directory: $(PhysiCellModelManager.dataDir())
-            PhysiCell Directory: $(PhysiCellModelManager.physicellDir())
-
-        You have since changed directories and are now trying to initialize with:
-            Data Directory: $data_dir
-            PhysiCell Directory: $physicell_dir
-
-        Do you want to reinitialize with these new paths? (y/n)
-        """
-        print(msg)
-        if lowercase(readline()) == "y"
-            println("Reinitializing Model Manager with new paths...")
-            initializeModelManager(physicell_dir, data_dir)
-        else
-            println("Keeping previous paths and not reinitializing Model Manager.")
-        end
-        println("To avoid this prompt in the future, you can use the `reinit_policy` keyword argument to specify `:ask`, `:update`, or `:keep`.")
-    end
-
-    return PhysiCellModelManager.pcmm_globals.initialized
+function studio_initialize_model_manager(args::Vararg{AbstractString})
+    path_to_physicell, path_to_data = get_pcmm_paths(args...)
+    initializeModelManager(path_to_physicell, path_to_data)
+    return PhysiCellModelManager.isInitialized()
 end
-
-"""
-    parse_reinit_policy(policy::Symbol)
-    parse_reinit_policy(policy::AbstractString)
-
-Parse the reinitialization policy from a Symbol or String to a [`ReinitPolicy`](@ref) enum.
-"""
-function parse_reinit_policy(policy::Symbol)
-    if policy == :ask
-        return ask
-    elseif policy == :update
-        return update
-    elseif policy == :keep
-        return keep
-    else
-        throw(ArgumentError("Invalid reinit_policy: $policy. Must be one of :ask, :update, or :keep."))
-    end
-end
-
-parse_reinit_policy(policy::AbstractString) = parse_reinit_policy(Symbol(policy))
 
 """
     get_pcmm_paths(args::Vararg{AbstractString})
@@ -145,20 +85,23 @@ See [`launch`](@ref) for details on how the arguments are interpreted.
 function get_pcmm_paths(args::Vararg{AbstractString})
     @assert length(args) <= 2 "Expected at most 2 arguments, got $(length(args))"
     if length(args) == 0
-        data_dir = "data"
         physicell_dir = "PhysiCell"
+        data_dir = "data"
     elseif length(args) == 1
-        data_dir = joinpath(args[1], "data")
         physicell_dir = joinpath(args[1], "PhysiCell")
+        data_dir = joinpath(args[1], "data")
     else
-        data_dir, physicell_dir = args
+        physicell_dir, data_dir = args
     end
-    return abspath(data_dir), abspath(physicell_dir)
+    return (physicell_dir, data_dir) .|> abspath .|> normpath
 end
 
 function get_folders(location::AbstractString, required::Bool)
     out = required ? String[] : String["--NONE--"]
-    append!(out, location |> Symbol |> PhysiCellModelManager.locationPath |> readdir)
+    location_directory = location |> Symbol |> PhysiCellModelManager.locationPath
+    folders = readdir(location_directory; join=true)
+    filter!(isdir, folders)
+    append!(out, basename.(folders))
     return out
 end
 
@@ -172,8 +115,7 @@ function set_input_folders()
 
     inputs = InputFolders(; kwargs...)
 
-    model_manager_studio_info("Input folders set")
-    display(inputs)
+    model_manager_studio_info(string(inputs))
 
     record_inputs()
 end
@@ -406,7 +348,11 @@ function get_ruled_behaviors(cell_type::AbstractString)
     global inputs
     path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
     xml_doc = parse_file(path_to_xml)
-    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"])
+    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"]; required=false)
+    if isnothing(rules_element)
+        model_manager_studio_info("No behavior ruleset found for cell type: $cell_type")
+        return String[]
+    end
     return [attribute(ce, "name") for ce in get_elements_by_tagname(rules_element, "behavior")]
 end
 
@@ -485,8 +431,10 @@ function get_target_path(location::AbstractString, tokens::Vararg{AbstractString
     if location == "config"
         return get_config_path(tokens...)
     elseif location == "rulesets_collection"
+        length(tokens) < 3 && return "Invalid rule path: not enough tokens"
         return rulePath(tokens...) |> PhysiCellModelManager.columnName
     elseif location == "ic_cell"
+        length(tokens) < 3 && return "Invalid ic_cell path: not enough tokens"
         tokens = [String.(tokens)...]
         tokens[3] = split(tokens[3], ":")[end] # just get the ID part since icCellsPath just needs the ID (this gui is showing the ID to help make it make sense for the user)
         if length(tokens) > 4
@@ -497,6 +445,7 @@ function get_target_path(location::AbstractString, tokens::Vararg{AbstractString
         end
         return icCellsPath(String.(tokens)...) |> PhysiCellModelManager.columnName
     elseif location == "ic_ecm"
+        length(tokens) < 3 && return "Invalid ic_ecm path: not enough tokens"
         return icECMPath(tokens...) |> PhysiCellModelManager.columnName
     else
         return [t for t in String.(tokens) if !isempty(t)] |> PhysiCellModelManager.columnName
@@ -583,17 +532,16 @@ model_manager_studio_debug(message::AbstractString; kws...) = model_manager_stud
 
 function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
     @assert type ∈ [:info, :warn, :error, :debug] "Log type must be either :info, :warn, :error, or :debug, got $type"
-    header = "---ModelManagerStudio.jl---"
+    msg = "<ModelManagerStudio.jl>\n$message"
     if type == :info
-        @info header kws...
+        @info msg kws...
     elseif type == :warn
-        @warn header kws...
+        @warn msg kws...
     elseif type == :error
-        @error header kws...
+        @error msg kws...
     elseif type == :debug
-        @debug header kws...
+        @debug msg kws...
     end
-    println(message)
 end
 
 function create_project_configuration_properties()
