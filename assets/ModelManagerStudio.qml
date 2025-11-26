@@ -611,6 +611,7 @@ ApplicationWindow {
                                                 // Update the token combo boxes based on the selected location
                                                 // Prevent updates while changing location
                                                 tokenComboBoxRepeater.itemAt(0).model = Julia.get_next_model(variedLocationComboBox.currentText);
+                                                tokenComboBoxRepeater.itemAt(0).modelChanged(); // Force update in case the model is the same
                                             }
 
                                             Text {

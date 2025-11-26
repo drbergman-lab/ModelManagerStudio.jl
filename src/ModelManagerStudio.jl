@@ -64,7 +64,6 @@ launch(; reinit_policy=ModelManagerStudio.ask)  # Launches with default paths, a
 function launch(args...; kwargs...)
     # Run the application
     e = init_model_manager_gui(args...; kwargs...)
-    println("Launching Model Manager Studio...")
     exec()
 end
 
@@ -172,8 +171,7 @@ function set_input_folders()
 
     inputs = InputFolders(; kwargs...)
 
-    model_manager_studio_info("Input folders set")
-    display(inputs)
+    model_manager_studio_info(string(inputs))
 
     record_inputs()
 end
@@ -583,17 +581,16 @@ model_manager_studio_debug(message::AbstractString; kws...) = model_manager_stud
 
 function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
     @assert type ∈ [:info, :warn, :error, :debug] "Log type must be either :info, :warn, :error, or :debug, got $type"
-    header = "---ModelManagerStudio.jl---"
+    msg = "<ModelManagerStudio.jl>\n$message"
     if type == :info
-        @info header kws...
+        @info msg kws...
     elseif type == :warn
-        @warn header kws...
+        @warn msg kws...
     elseif type == :error
-        @error header kws...
+        @error msg kws...
     elseif type == :debug
-        @debug header kws...
+        @debug msg kws...
     end
-    println(message)
 end
 
 function create_project_configuration_properties()
