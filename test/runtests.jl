@@ -5,7 +5,7 @@ createProject()
 @testset "ModelManagerStudio.jl" begin
     @testset "GUI initialization" begin
         @test begin
-            ModelManagerStudio.launch(; testing=true)
+            ModelManagerStudio.launch()
             true
         end
 

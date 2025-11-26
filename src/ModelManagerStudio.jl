@@ -48,7 +48,7 @@ end
 Internal function to initialize the Model Manager GUI with the specified arguments.
 Called by [`launch`](@ref).
 """
-function init_model_manager_gui(args::Vararg{AbstractString}; testing::Bool=false, kwargs...)
+function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     if !studio_initialize_model_manager(args...; kwargs...)
         throw("Error initializing Model Manager. Please make sure you are in the correct directory.")
     end
@@ -60,6 +60,9 @@ function init_model_manager_gui(args::Vararg{AbstractString}; testing::Bool=fals
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
+
+    # See if in testing mode
+    testing = get(ENV, "MODEL_MANAGER_STUDIO_TESTING", "false") == "true"
 
     # Load the QML file
     return loadqml(qml_file; reqLocModel=required_input_folders(), optLocModel=optional_input_folders(), guiproperties=color_scheme(), project_configuration_properties=create_project_configuration_properties(), testing=JuliaPropertyMap("testing" => testing))
