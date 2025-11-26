@@ -3,6 +3,8 @@ module ModelManagerStudio
 # Write your package code here.
 using QML, PhysiCellModelManager, LightXML, Compat, Distributions
 
+export main
+
 @compat public launch
 
 include("colors.jl")
@@ -37,7 +39,6 @@ launch("path/to/PhysiCell", "path/to/data")  # Launches with specified PhysiCell
 function launch(args...; kwargs...)
     # Run the application
     _ = init_model_manager_gui(args...; kwargs...)
-    println("Launching Model Manager Studio...")
     exec()
 end
 
