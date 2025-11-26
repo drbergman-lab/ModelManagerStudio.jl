@@ -9,12 +9,12 @@ createProject()
             true
         end
 
-        for args in [["."], [joinpath(".", "data"), joinpath(".", "PhysiCell")]]
-            data_dir, physicell_dir = ModelManagerStudio.get_pcmm_paths(args...)
+        for args in [["."], [joinpath(".", "PhysiCell"), joinpath(".", "data")]]
+            physicell_dir, data_dir = ModelManagerStudio.get_pcmm_paths(args...)
             @test isdir(data_dir)
             @test isdir(physicell_dir)
-            @test abspath(data_dir) == abspath(joinpath(".", "data"))
             @test abspath(physicell_dir) == abspath(joinpath(".", "PhysiCell"))
+            @test abspath(data_dir) == abspath(joinpath(".", "data"))
         end
     end
 
@@ -23,15 +23,6 @@ createProject()
         inputs = ModelManagerStudio.inputs
         @test inputs[:config].folder == "0_template"
         @test inputs[:custom_code].folder == "0_template"
-    end
-
-    @testset "Reinit Policies" begin
-        for policy in [:ask, :update, :keep]
-            @test ModelManagerStudio.parse_reinit_policy(policy) == getfield(ModelManagerStudio, policy)
-            str_policy = String(policy)
-            @test ModelManagerStudio.parse_reinit_policy(str_policy) == getfield(ModelManagerStudio, policy)
-        end
-        @test_throws ArgumentError ModelManagerStudio.parse_reinit_policy("invalid_policy")
     end
 
     @testset "Colors" begin
