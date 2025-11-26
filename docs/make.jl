@@ -9,7 +9,7 @@ makedocs(;
     sitename="ModelManagerStudio.jl",
     format=Documenter.HTML(;
         canonical="https://drbergman-lab.github.io/ModelManagerStudio.jl",
-        edit_link="development",
+        edit_link="main",
         assets=String[],
     ),
     pages=[
@@ -19,5 +19,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/drbergman-lab/ModelManagerStudio.jl",
-    devbranch="development",
+    devbranch="main",
 )
