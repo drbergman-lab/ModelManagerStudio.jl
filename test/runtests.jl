@@ -134,6 +134,16 @@ createProject()
         end
     end
 
+    @testset "Documented API is reachable" begin
+        #! The README tells users to write `using ModelManagerStudio; launch()`. That only
+        #! works if `launch` is exported -- it was `@compat public`, which is not the same
+        #! thing, so the documented invocation raised UndefVarError.
+        @test :launch in names(ModelManagerStudio)
+        @test :main in names(ModelManagerStudio)
+        #! Reachable unqualified, which is what the docs promise.
+        @test isdefined(@__MODULE__, :launch)
+    end
+
     @testset "Entrypoint exists and reports failure" begin
         #! `main` is exported, but main.jl used to be included only on 1.11+, so on the LTS
         #! the package claims compat with the exported name did not exist.

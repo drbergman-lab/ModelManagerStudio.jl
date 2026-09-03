@@ -14,9 +14,13 @@ import InteractiveUtils
 #! belongs behind an extension point.
 import ModelManager as MM
 
-export main
-
-@compat public launch
+#! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
+#! backwards: `main` (which a user never calls interactively) was exported while `launch`
+#! (which is the documented entry point, and what README and the tests use) was only
+#! `@compat public`, so `using ModelManagerStudio; launch()` -- the documented invocation --
+#! raised UndefVarError. Verified no `launch` export collides across PhysiCellModelManager,
+#! ModelManager, QML, Distributions or LightXML.
+export launch, main
 
 include("colors.jl")
 include("value_parser.jl")
