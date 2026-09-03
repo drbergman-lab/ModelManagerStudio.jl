@@ -131,6 +131,34 @@ createProject()
             @test (k == "branch") == !isempty(children)
         end
 
+        #! Grouping is depth-dependent. `use_2D` at the top level is domain/use_2D; under a
+        #! cell type's motility it is a motility option. A table keyed on the token name alone
+        #! labelled the domain's use_2D as "Motility".
+        top       = ModelManagerStudio.get_next_model("config")
+        top_grps  = ModelManagerStudio.get_token_groups("config")
+        top_of    = Dict(zip(top, top_grps))
+        @test top_of["use_2D"] == "Domain"
+        @test top_of["x_min"] == "Domain"
+        @test top_of["dz"] == "Domain"
+        @test top_of["max_time"] == "Time"
+        @test top_of["dt_diffusion"] == "Time"
+        @test top_of["full_data_save_interval"] == "Saves"
+        @test top_of["user_parameter"] == "User parameters"
+        @test top_of[ct] == "Cell types"
+
+        #! The same token, one level deeper, is motility.
+        mot_toks = ModelManagerStudio.get_next_model("config", ct, "motility")
+        mot_grps = ModelManagerStudio.get_token_groups("config", ct, "motility")
+        @test Dict(zip(mot_toks, mot_grps))["use_2D"] == "Motility"
+
+        #! Nothing should be landing in the catch-all at the top level any more: an "Other"
+        #! bucket holding the whole domain and every clock is what made the menu unreadable.
+        @test !("Other" in top_grps)
+
+        #! Top level must also be contiguous by group.
+        top_runs = count(i -> i == 1 || top_grps[i] != top_grps[i-1], eachindex(top_grps))
+        @test top_runs == length(unique(top_grps))
+
         #! Spot-check that the labels are the semantic ones, not a rehash of the token.
         gof = Dict(zip(toks, grps))
         @test gof["speed"] == "Motility"
@@ -148,6 +176,14 @@ createProject()
             println(io, "     ", rpad(t, 34), k == "branch" ? "\u203a" : "")
         end
         @info "cell-type menu:\n" * String(take!(io))
+
+        io2 = IOBuffer(); prev2 = ""
+        top_kinds = ModelManagerStudio.get_token_kinds("config")
+        for (t, g, k) in zip(top, top_grps, top_kinds)
+            g != prev2 && (println(io2, "  == ", g, " =="); prev2 = g)
+            println(io2, "     ", rpad(t, 28), k == "branch" ? "\u203a" : "")
+        end
+        @info "top-level menu:\n" * String(take!(io2))
     end
 
     @testset "Unresolvable tokens are filtered, not curated away" begin

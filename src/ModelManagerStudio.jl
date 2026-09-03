@@ -407,8 +407,35 @@ end
 #! list mixes entries that open another menu with entries that ARE the parameter, and nothing
 #! distinguished them.
 #!
-#! This table is PhysiCell vocabulary and belongs in the simulator extension alongside the
-#! `config_*_tokens` cascade it labels. It lives here for now because that cascade does.
+#! Grouping is DEPTH-DEPENDENT: the same token name means different things at different levels.
+#! `use_2D` at the top level is `domain/use_2D`, but under a cell type's `motility` it is a
+#! motility option -- so a table keyed on the token name alone labelled the domain's `use_2D`
+#! as "Motility". Hence two tables, selected by how deep the chain is.
+#!
+#! These tables are PhysiCell vocabulary and belong in the simulator extension alongside the
+#! `config_*_tokens` cascade they label. They live here for now because that cascade does.
+
+"""
+Groups for the top level of `config`, where tokens name the domain, the clocks, the save
+intervals and the user parameter block.
+"""
+const CONFIG_TOP_LEVEL_GROUPS = Dict{String,String}(
+    "x_min" => "Domain", "x_max" => "Domain", "y_min" => "Domain", "y_max" => "Domain",
+    "z_min" => "Domain", "z_max" => "Domain", "dx" => "Domain", "dy" => "Domain",
+    "dz" => "Domain", "use_2D" => "Domain",
+
+    "max_time" => "Time", "dt_intracellular" => "Time", "dt_diffusion" => "Time",
+    "dt_mechanics" => "Time", "dt_phenotype" => "Time",
+
+    "full_data_save_interval" => "Saves", "svg_data_save_interval" => "Saves",
+
+    "user_parameter" => "User parameters",
+)
+
+"""
+Groups for tokens below the top level — the phenotype sections of a cell definition, and the
+motility options where `use_2D` genuinely does mean motility.
+"""
 const CONFIG_TOKEN_GROUPS = Dict{String,String}(
     "cycle" => "Cycle & death", "apoptosis" => "Cycle & death", "necrosis" => "Cycle & death",
 
@@ -449,12 +476,20 @@ function token_group(location::AbstractString, chain::Vector{String}, token::Abs
     location == "config" || return ""
     t = String(token)
     startswith(t, "custom:") && return "Custom data"
-    haskey(CONFIG_TOKEN_GROUPS, t) && return CONFIG_TOKEN_GROUPS[t]
-    #! At the top level a bare name is a cell type or a substrate; one level in, under a cell
-    #! type, a substrate name means that cell's secretion/uptake of it.
-    t in get_substrate_names() && return isempty(chain) ? "Substrates" : "Secretion & uptake"
-    t in get_cell_type_names() && return isempty(chain) ? "Cell types" : "Targets"
-    return "Other"
+
+    #! Names first, since a user's cell type or substrate could in principle collide with a
+    #! tabulated tag, and the model's own vocabulary should win.
+    if t in get_substrate_names()
+        return isempty(chain) ? "Substrates" : "Secretion & uptake"
+    end
+    if t in get_cell_type_names()
+        return isempty(chain) ? "Cell types" : "Targets"
+    end
+
+    #! Depth decides which table applies. Consulting the deeper table at the top level is what
+    #! put the domain's `use_2D` under "Motility".
+    table = isempty(chain) ? CONFIG_TOP_LEVEL_GROUPS : CONFIG_TOKEN_GROUPS
+    return get(table, t, "Other")
 end
 
 #! Heading order. The source lists were grouped, but not contiguously -- "Motility" appeared
@@ -462,9 +497,11 @@ end
 #! migration_bias shortcuts, and "Cell interactions" likewise. Headings need each group in one
 #! run, so the tokens are ordered by group before they leave for QML. Ordering is stable, so
 #! entries keep their authored order within a group.
-const CONFIG_GROUP_ORDER = ["Cell types", "Substrates", "Secretion & uptake", "Cycle & death",
-                            "Motility", "Mechanics", "Volume", "Cell interactions", "Integrity",
-                            "Targets", "Custom data", "Distributions", "Other", ""]
+const CONFIG_GROUP_ORDER = ["Cell types", "Substrates",
+                            "Domain", "Time", "Saves", "User parameters",
+                            "Secretion & uptake", "Cycle & death", "Motility", "Mechanics",
+                            "Volume", "Cell interactions", "Integrity", "Targets",
+                            "Custom data", "Distributions", "Other", ""]
 
 """
     _grouped_order(location, chain, tokens)
