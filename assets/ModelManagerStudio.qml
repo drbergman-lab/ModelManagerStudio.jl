@@ -13,6 +13,12 @@ ApplicationWindow {
     property color variedHighlight: "#d0e8ff"
     property string variedMarker: "\u25C8"   // ◈ — a non-color cue, since color alone fails WCAG 1.4.1
 
+    // An optional location with no folder chosen. It gets a filled tile of the SAME geometry
+    // as a varied one, so the grid reads as a set of equal cells in three states rather than
+    // some tiles having a box and others floating with no boundary at all.
+    property color unusedTint: "#e6e8ea"
+    property color unusedTextColor: "#8a8f98"
+
     // Breathing room added to a ComboBox on top of its own padding and indicator width.
     // The token chain measures its widest entry with a hidden Text and sizes to that, but a
     // Text's implicitWidth is the glyph run alone -- it accounts for neither the control's
@@ -136,6 +142,11 @@ ApplicationWindow {
                             property string location: "default_location"
                             property bool isVaried: false
                             property bool isRequired: false
+                            // Declarative rather than assigned in a handler, so it cannot fall
+                            // out of step with what the ComboBox is actually showing.
+                            property bool isUnused: !isRequired
+                                && (locationComboBox.currentText === project_configuration_properties.no_folder_sentinel
+                                    || locationComboBox.currentText === "")
                             property alias comboBox: locationComboBox
                             property alias label: labelTextItem // These layout properties will be applied when used in a Layout
 
@@ -151,7 +162,9 @@ ApplicationWindow {
 
                                 width: columnLayout.implicitWidth + 10
                                 height: columnLayout.implicitHeight + 10 // padding/margin
-                                color: locationItem.isVaried ? mainWindow.variedHighlight : "transparent"
+                                color: locationItem.isVaried ? mainWindow.variedHighlight
+                                     : locationItem.isUnused ? mainWindow.unusedTint
+                                     : "transparent"
                                 radius: 4
                                 border.width: 1
                                 border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
@@ -168,9 +181,11 @@ ApplicationWindow {
                                         text: locationItem.isVaried ? (mainWindow.variedMarker + " " + labelText) : labelText
                                         font.bold: true
                                         font.pixelSize: mainWindow.fontSizeOfLevel[level]
+                                        color: locationItem.isUnused ? mainWindow.unusedTextColor : syscolors.text
                                         Accessible.role: Accessible.StaticText
                                         Accessible.name: locationItem.isVaried
                                             ? (labelText + ", supports parameter variation")
+                                            : locationItem.isUnused ? (labelText + ", not in use")
                                             : labelText
                                     }
 
@@ -231,8 +246,26 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: "folders that can be varied"
+                            text: "can be varied"
                             color: syscolors.text
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            Layout.alignment: Qt.AlignVCenter
+                            rightPadding: 10
+                        }
+
+                        Rectangle {
+                            width: legendGlyph.implicitWidth + 8
+                            height: legendGlyph.implicitHeight + 4
+                            radius: 3
+                            color: mainWindow.unusedTint
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.unusedTint, 1.2)
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        Text {
+                            text: "not in use"
+                            color: mainWindow.unusedTextColor
                             font.pixelSize: mainWindow.fontSizeOfLevel[4]
                             Layout.alignment: Qt.AlignVCenter
                         }
@@ -483,7 +516,7 @@ ApplicationWindow {
                                         RowLayout {
                                             Layout.leftMargin: 20
                                             spacing: 5
-                                            visible: modelData.value !== "--NONE--"
+                                            visible: modelData.value !== project_configuration_properties.no_folder_sentinel
 
                                             Text {
                                                 text: modelData.name + ":"

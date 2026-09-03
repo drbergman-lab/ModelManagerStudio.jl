@@ -42,6 +42,12 @@ global tokens_avs = Tuple[]
 #! exception out of a QML callback.
 const EMPTY_VOCABULARY = String[]
 
+#! What an optional location's dropdown shows when no folder is chosen. Defined once and
+#! handed to QML in `create_project_configuration_properties`, because it was a magic string
+#! duplicated on both sides of the Julia/QML boundary -- exactly the kind of literal that
+#! drifts when one side changes.
+const NO_FOLDER_SENTINEL = "--NONE--"
+
 
 """
     launch()
@@ -166,7 +172,7 @@ function get_pcmm_paths(args::Vararg{AbstractString})
 end
 
 function get_folders(location::AbstractString, required::Bool)
-    out = required ? String[] : String["--NONE--"]
+    out = required ? String[] : String[NO_FOLDER_SENTINEL]
     location_directory = location |> Symbol |> PhysiCellModelManager.locationPath
     folders = readdir(location_directory; join=true)
     filter!(isdir, folders)
@@ -179,7 +185,7 @@ function set_input_folders()
 
     kwargs = Dict{Symbol, String}()
     for loc in current_required_locations ∪ current_optional_locations
-        kwargs[Symbol(loc.location)] = loc.folder == "--NONE--" ? "" : loc.folder
+        kwargs[Symbol(loc.location)] = loc.folder == NO_FOLDER_SENTINEL ? "" : loc.folder
     end
 
     inputs = InputFolders(; kwargs...)
@@ -198,7 +204,7 @@ function get_input_folder(location::AbstractString)
         return "inputs not set"
     end
     out = inputs[Symbol(location)].folder
-    return isempty(out) ? "--NONE--" : out
+    return isempty(out) ? NO_FOLDER_SENTINEL : out
 end
 
 function get_substrate_names()
@@ -948,7 +954,8 @@ function create_project_configuration_properties()
     opt_n_rows = ceil(n_opt / max_per_row) |> Int
     opt_n_cols = min(max_per_row, n_opt)
     return JuliaPropertyMap("req_n_rows" => req_n_rows, "req_n_cols" => req_n_cols, "opt_n_rows" => opt_n_rows, "opt_n_cols" => opt_n_cols,
-        "req_locations" => String.(req_locs), "opt_locations" => String.(opt_locs))
+        "req_locations" => String.(req_locs), "opt_locations" => String.(opt_locs),
+        "no_folder_sentinel" => NO_FOLDER_SENTINEL)
 end
 
 function location_label(location::AbstractString)
@@ -964,7 +971,7 @@ is_varied_location(location::AbstractString) = Symbol(location) ∈ PhysiCellMod
 
 function is_varied_location(location::AbstractString, folder::AbstractString)
     folder = String(folder)
-    if isempty(folder) || folder == "--NONE--"
+    if isempty(folder) || folder == NO_FOLDER_SENTINEL
         return false
     end
     input_folder = PhysiCellModelManager.InputFolder(Symbol(location), folder)

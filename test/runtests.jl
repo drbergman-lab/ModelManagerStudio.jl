@@ -93,6 +93,19 @@ createProject()
         end
     end
 
+    @testset "No-folder sentinel is shared with QML" begin
+        #! The sentinel used to be a literal on both sides of the Julia/QML boundary. QML now
+        #! reads it from project_configuration_properties, so it must actually be published
+        #! there -- a missing key would silently make every optional tile read as "in use".
+        props = ModelManagerStudio.create_project_configuration_properties()
+        @test props["no_folder_sentinel"] == ModelManagerStudio.NO_FOLDER_SENTINEL
+
+        #! And the round trip an optional location makes: offered in the dropdown, stored as "".
+        @test ModelManagerStudio.NO_FOLDER_SENTINEL in
+              ModelManagerStudio.get_folders(String(first(MM.projectLocations().required)), false)
+        @test !ModelManagerStudio.is_varied_location("config", ModelManagerStudio.NO_FOLDER_SENTINEL)
+    end
+
     @testset "Menu entries are grouped and typed" begin
         ct = first(ModelManagerStudio.get_cell_type_names())
         toks  = ModelManagerStudio.get_next_model("config", ct)
