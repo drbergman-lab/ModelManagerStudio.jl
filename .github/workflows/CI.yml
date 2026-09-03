@@ -17,6 +17,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
+      # NOT setting QT_FATAL_WARNINGS=1 yet, though it is the right end state — it would turn
+      # binding loops, conflicting anchors, unknown properties and QML JS errors into build
+      # failures. Measured on Julia 1.12 / macOS arm64: it currently aborts (signal 6) on a Qt
+      # font-alias warning, `missing font family "Sans Serif"`, which is Qt's own font
+      # resolution rather than a defect in our QML. Enable it once the QML is split into
+      # components with a Theme singleton that sets an explicit font family, and once the known
+      # conflicting anchors and the implicitHeight binding loop are fixed. See PRD.md.
     timeout-minutes: 60
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
@@ -32,6 +39,16 @@ jobs:
         arch: ["x64"]
         shell: ["bash"]
         compiler: ["g++"]
+        include:
+          # A desktop GUI whose likeliest user platform is macOS had zero macOS coverage.
+          # The QMacStyle ComboBox segfault fixed in this branch was invisible to a
+          # Linux-only matrix, and QT_QPA_PLATFORM=offscreen does not protect against it:
+          # the platform plugin and the Qt Quick Controls style are chosen independently.
+          - version: '1'
+            os: macos-latest
+            arch: aarch64
+            shell: bash
+            compiler: clang++
 
     defaults:
       run:
@@ -51,25 +68,6 @@ jobs:
       - name: Add BergmanLabRegistry
         run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman-lab/BergmanLabRegistry.git"))'
 
-      - name: Install system dependencies for Qt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            qtbase5-dev \
-            qtdeclarative5-dev \
-            qt5-qmake \
-            qml-module-qtquick-controls \
-            qml-module-qtquick-controls2 \
-            qml-module-qtquick2 \
-            qml-module-qtgraphicaleffects \
-            qml-module-qtquick-layouts \
-            qml-module-qtquick-window2 \
-            libqt5gui5 \
-            libqt5qml5 \
-            libqt5quick5 \
-            libqt5widgets5 \
-            libxcb-xinerama0
-            
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         env:
@@ -112,25 +110,6 @@ jobs:
           using Pkg
           Pkg.develop(PackageSpec(path=pwd()))
           Pkg.instantiate()
-
-      - name: Install system dependencies for Qt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            qtbase5-dev \
-            qtdeclarative5-dev \
-            qt5-qmake \
-            qml-module-qtquick-controls \
-            qml-module-qtquick-controls2 \
-            qml-module-qtquick2 \
-            qml-module-qtgraphicaleffects \
-            qml-module-qtquick-layouts \
-            qml-module-qtquick-window2 \
-            libqt5gui5 \
-            libqt5qml5 \
-            libqt5quick5 \
-            libqt5widgets5 \
-            libxcb-xinerama0
 
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-docdeploy@v1
