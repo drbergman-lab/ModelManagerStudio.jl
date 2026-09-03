@@ -2,14 +2,29 @@ module ModelManagerStudio
 
 # Write your package code here.
 using QML, PhysiCellModelManager, LightXML, Compat, Distributions
+import InteractiveUtils
+
+#! ModelManager is imported directly, not reached through PhysiCellModelManager.
+#! PCMM `@reexport using ModelManager`, so MM's *exported* names resolve as
+#! `PhysiCellModelManager.x` — but `variationTarget` and `variationValues` are NOT
+#! exported by MM, so `PhysiCellModelManager.variationTarget` is an UndefVarError on
+#! PCMM >= 0.3 (where MM was split out). Importing MM under an alias also makes the
+#! framework-agnostic boundary explicit: everything reached as `MM.` is generic, and
+#! everything still reached as `PhysiCellModelManager.` is PhysiCell-specific and
+#! belongs behind an extension point.
+import ModelManager as MM
 
 export main
 
 @compat public launch
 
 include("colors.jl")
+include("value_parser.jl")
 include("record.jl")
-VERSION >= v"1.11" && include("main.jl")
+#! Unconditional: main.jl itself chooses between the `@main` entrypoint (1.11+) and a plain
+#! exported `main` function, so the LTS this package claims compat with is not left with an
+#! exported name that does not exist.
+include("main.jl")
 
 global current_required_locations
 global current_optional_locations
@@ -57,9 +72,19 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
 
     @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
     @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
+    @qmlfunction is_resolvable_target delete_variation clear_variations allowed_distribution_names
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
+
+    #! Pin the Qt Quick Controls style. On macOS the "NativeStyle" plugin shipped with the
+    #! Qt6 build in jlqml_jll segfaults while drawing a ComboBox
+    #! (objc_msgSend -> QMacStylePrivate::drawNSViewInRect -> QMacStyle::drawComplexControl).
+    #! Note QT_QPA_PLATFORM=offscreen does NOT avoid this: the platform plugin and the
+    #! controls style are chosen independently. "Basic" is also the only style that honors
+    #! the custom `background` Rectangles this GUI defines, so the look is unchanged.
+    #! Respect an explicit user choice.
+    get!(ENV, "QT_QUICK_CONTROLS_STYLE", "Basic")
 
     # See if in testing mode
     testing = get(ENV, "MODEL_MANAGER_STUDIO_TESTING", "false") == "true"
@@ -326,8 +351,15 @@ function get_tokens(location::AbstractString, previous_tokens::Vector{String})
             return config_second_tokens(previous_tokens[1])
         elseif n_tokens == 2
             return config_third_tokens(previous_tokens[1], previous_tokens[2])
-        else
+        elseif n_tokens == 3
             return config_fourth_tokens(previous_tokens[1], previous_tokens[2], previous_tokens[3])
+        else
+            #! Config paths bottom out at the fourth token. This branch used to fall through
+            #! to `config_fourth_tokens(previous_tokens[1:3]...)`, which ignores every token
+            #! past the third and therefore returns the SAME list forever — so selecting
+            #! e.g. `cell_type > cycle > rate > 0` filled every ComboBox with identical
+            #! phase indexes, ran the repeater off its end, and left the target unresolved.
+            return String[]
         end
     elseif location == "rulesets_collection"
         if n_tokens == 0
@@ -345,6 +377,14 @@ function get_tokens(location::AbstractString, previous_tokens::Vector{String})
         else
             return get_next_ic_cell_tags(previous_tokens...)
         end
+    else
+        #! A varied location with no token grammar. The PhysiCell template also varies
+        #! `intracellular` and `ic_ecm`, which fall through here — this used to return
+        #! `nothing`, which QML renders as an empty ComboBox with no explanation. Returning
+        #! an empty vector and saying so makes the gap diagnosable instead of mysterious.
+        #! Both need a token grammar; see the parameter-browser interface work.
+        model_manager_studio_warn("No parameter browser for location \"$(location)\" yet — nothing to select.")
+        return String[]
     end
 end
 
@@ -386,16 +426,21 @@ end
 
 function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String})
     child_elements_ = child_elements(e)
-    temp_dict = Dict()
+    #! Group children by tag, preserving document order. An untyped `Dict` here made the
+    #! ComboBox ordering vary between runs, since Dict iteration order is unspecified.
+    tag_order = String[]
+    grouped = Dict{String,Vector{XMLElement}}()
     for ce in child_elements_
         tag = name(ce)
-        if tag ∉ keys(temp_dict)
-            temp_dict[tag] = []
+        if !haskey(grouped, tag)
+            push!(tag_order, tag)
+            grouped[tag] = XMLElement[]
         end
-        push!(temp_dict[tag], ce)
+        push!(grouped[tag], ce)
     end
     out = String[]
-    for (tag, ces) in temp_dict
+    for tag in tag_order
+        ces = grouped[tag]
         if length(ces) == 1
             unique_attrs = [a for a in id_attributes if has_attribute(ces[1], a)]
             next_val = isempty(unique_attrs) ? tag : "$(tag):$(unique_attrs[1]):$(attribute(ces[1], unique_attrs[1]))"
@@ -417,7 +462,11 @@ function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String}
         if unique_attribute == ""
             push!(out, "$(tag) (ambiguous)")
         else
-            append!(out, ["$(tag):$(attribute(ce, unique_attribute))" for ce in ces])
+            #! Three parts, not two. `ModelManager.retrieveElement` splits a token on ":"
+            #! with `limit=3` and `getChildByAttribute` destructures exactly three values,
+            #! so a "tag:value" token raises a BoundsError once the path is resolved. The
+            #! single-child branch above already emitted three parts; this one did not.
+            append!(out, ["$(tag):$(unique_attribute):$(attribute(ce, unique_attribute))" for ce in ces])
         end
     end
     return out
@@ -431,14 +480,34 @@ function get_varied_locations()
     return [f.location for f in values(inputs.input_folders) if f.varied] .|> String
 end
 
+#! Sentinel prefix for a target path that could not be resolved. `get_target_path` has to
+#! return a String because QML can only receive primitives, so failure is encoded in the
+#! string — but it is encoded in ONE place with ONE marker, and `is_resolvable_target` is the
+#! only thing allowed to interpret it. Previously each failure invented its own prose
+#! ("INVALID PATH", "Invalid rule path: not enough tokens"), and nothing checked for them.
+const TARGET_ERROR_PREFIX = "\u26a0 "
+
+target_error(msg::AbstractString) = TARGET_ERROR_PREFIX * msg
+
+"""
+    is_resolvable_target(target::AbstractString)
+
+Whether `target` is a real parameter path rather than a placeholder or an error report from
+[`get_target_path`](@ref). The GUI uses this to gate variation creation.
+"""
+function is_resolvable_target(target::AbstractString)
+    t = strip(String(target))
+    return !isempty(t) && !startswith(t, TARGET_ERROR_PREFIX)
+end
+
 function get_target_path(location::AbstractString, tokens::Vararg{AbstractString})
     if location == "config"
         return get_config_path(tokens...)
     elseif location == "rulesets_collection"
-        length(tokens) < 3 && return "Invalid rule path: not enough tokens"
+        length(tokens) < 3 && return target_error("Choose a behavior and a rule field.")
         return rulePath(tokens...) |> PhysiCellModelManager.columnName
     elseif location == "ic_cell"
-        length(tokens) < 3 && return "Invalid ic_cell path: not enough tokens"
+        length(tokens) < 3 && return target_error("Choose a patch type and a patch field.")
         tokens = [String.(tokens)...]
         tokens[3] = split(tokens[3], ":")[end] # just get the ID part since icCellsPath just needs the ID (this gui is showing the ID to help make it make sense for the user)
         if length(tokens) > 4
@@ -449,7 +518,7 @@ function get_target_path(location::AbstractString, tokens::Vararg{AbstractString
         end
         return icCellsPath(String.(tokens)...) |> PhysiCellModelManager.columnName
     elseif location == "ic_ecm"
-        length(tokens) < 3 && return "Invalid ic_ecm path: not enough tokens"
+        length(tokens) < 3 && return target_error("Choose an ECM patch and a field.")
         return icECMPath(tokens...) |> PhysiCellModelManager.columnName
     else
         return [t for t in String.(tokens) if !isempty(t)] |> PhysiCellModelManager.columnName
@@ -465,12 +534,15 @@ function get_config_path(tokens::Vararg{AbstractString})
             tokens[2] = "Dirichlet_options"
         end
     end
-    s = "INVALID PATH"
+    s = target_error("Not a complete parameter path.")
     try
         s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> PhysiCellModelManager.columnName
     catch e
         model_manager_studio_warn("Invalid configuration path:\n\t$(join(tokens, " > "))")
-        model_manager_studio_debug("Error details: $(e.msg)")
+        #! `sprint(showerror, e)`, not `e.msg`: only some exception types have a `.msg` field,
+        #! so a BoundsError or MethodError from configPath made this handler itself throw,
+        #! turning a logged warning into an unhandled error inside a Qt callback.
+        model_manager_studio_debug("Error details: $(sprint(showerror, e))")
     end
     return s
 end
@@ -478,16 +550,23 @@ end
 function create_variation(target::AbstractString, vals::AbstractString, tokens::Vararg{AbstractString})
     global tokens_avs
     tokens = [t for t in String.(tokens) if !isempty(t)]
+
+    #! Refuse a target that is really an error message. `get_target_path` reports failure by
+    #! returning strings like "INVALID PATH", which the UI renders and then hands straight
+    #! back here. `columnNameToXMLPath` is just `split(s, "/")`, so those strings construct a
+    #! perfectly valid-looking ElementaryVariation that is written to the transcript and fails
+    #! only once the simulation runs.
+    if !is_resolvable_target(target)
+        model_manager_studio_error("Cannot create a variation: \"$(target)\" is not a parameter path. Finish choosing a parameter first.")
+        return
+    end
+
     target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
     try
-        vals = vals |> Meta.parse |> eval
+        vals = parse_value_spec(vals)
     catch e
-        msg = """
-        Error parsing values for variation:
-          vals: $vals
-          error: $(e)
-        """
-        model_manager_studio_error(msg)
+        e isa ValueSpecError || rethrow()
+        model_manager_studio_error("Could not use that value: $(sprint(showerror, e))")
         return
     end
     if vals isa AbstractVector
@@ -508,25 +587,82 @@ function get_current_variations()
 end
 
 function variation_exists(target::AbstractString)
+    is_resolvable_target(target) || return false
     target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
     return find_variation_index(target) |> !isnothing
 end
 
-function find_variation_index(target::Vector{<:AbstractString})
+"""
+    delete_variation(index::Int)
+
+Remove the variation at 1-based `index` from the pending design and rewrite the transcript.
+Returns `true` if a variation was removed.
+
+Called from QML. Until this existed, `tokens_avs` could only ever grow — a mistaken variation
+could be removed only by restarting the application.
+"""
+function delete_variation(index::Int)
     global tokens_avs
-    return findfirst(tokens_av -> PhysiCellModelManager.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
+    if index < 1 || index > length(tokens_avs)
+        model_manager_studio_warn("No variation at position $(index) to delete.")
+        return false
+    end
+    deleteat!(tokens_avs, index)
+    record_variations()
+    return true
 end
 
+"""
+    clear_variations()
+
+Discard every pending variation and rewrite the transcript. Called from QML.
+"""
+function clear_variations()
+    global tokens_avs
+    empty!(tokens_avs)
+    record_variations()
+    return true
+end
+
+function find_variation_index(target::Vector{<:AbstractString})
+    global tokens_avs
+    return findfirst(tokens_av -> MM.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
+end
+
+"""
+    run_simulation()
+
+Run the pending campaign and always report an outcome to the GUI.
+
+Called from QML. Still synchronous — the window is unresponsive for the duration — but a
+failure can no longer strand the interface. The non-blocking version is Phase 1 work; see
+[PRD.md](PRD.md), "Run and progress".
+"""
 function run_simulation()
     global inputs, tokens_avs
 
-    record_run()
-    
-    # Run the simulation with the provided inputs
-    run(inputs, [av for (_, av) in tokens_avs])
+    if !isdefined(ModelManagerStudio, :inputs)
+        model_manager_studio_error("Create inputs before running.")
+        @emit simulationFinished()
+        return
+    end
 
-    # Emit signal when simulation is complete
-    @emit simulationFinished()
+    avs = [av for (_, av) in tokens_avs]
+
+    #! `record_run` used to be called BEFORE the run, so a campaign that threw was still
+    #! written to the transcript as though it had happened — the one thing the transcript is
+    #! supposed to guarantee. Record only after a successful return.
+    try
+        run(inputs, avs)
+        record_run()
+    catch e
+        #! Without this, `@emit simulationFinished()` never fired: the run button stayed
+        #! disabled forever and the only trace was on stderr, which a windowed app has no
+        #! way to show. Always emit, so the UI can recover.
+        model_manager_studio_error("The run failed:\n$(sprint(showerror, e))")
+    finally
+        @emit simulationFinished()
+    end
 end
 
 model_manager_studio_info(message::AbstractString; kws...) = model_manager_studio_log(:info, message; kws...)
