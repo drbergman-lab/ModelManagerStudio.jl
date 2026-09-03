@@ -134,6 +134,25 @@ createProject()
         end
     end
 
+    @testset "Zero-arg launch adopts an existing project" begin
+        #! By this point the suite has an initialized project. A 0-arg initialization must
+        #! adopt it rather than re-deriving paths from pwd() -- otherwise launching from any
+        #! directory other than the project root silently retargets or fails, even though the
+        #! session already has a perfectly good project open.
+        @test ModelManagerStudio._model_manager_is_initialized()
+        data_before = MM.dataDir()
+
+        elsewhere = mktempdir()
+        cd(elsewhere) do
+            @test ModelManagerStudio.studio_initialize_model_manager()
+            @test MM.dataDir() == data_before
+        end
+
+        #! Explicit arguments still win over the adopted project.
+        @test ModelManagerStudio.get_pcmm_paths(".") ==
+              (abspath(normpath(joinpath(".", "PhysiCell"))), abspath(normpath(joinpath(".", "data"))))
+    end
+
     @testset "Documented API is reachable" begin
         #! The README tells users to write `using ModelManagerStudio; launch()`. That only
         #! works if `launch` is exported -- it was `@compat public`, which is not the same
@@ -290,6 +309,46 @@ createProject()
         n_before = length(ModelManagerStudio.get_current_variations())
         ModelManagerStudio.create_variation(bad, "[1.0]")
         @test length(ModelManagerStudio.get_current_variations()) == n_before
+    end
+
+    @testset "Variation blocker reports why" begin
+        V = ModelManagerStudio.value_spec_error
+        B = ModelManagerStudio.variation_blocker
+
+        #! Valid input is not an error.
+        @test V("[1.0, 2.0]") == ""
+        @test V("Normal(1.0, 0.2)") == ""
+        #! Empty is incomplete, not wrong — no error before the user has typed.
+        @test V("") == ""
+        @test V("   ") == ""
+
+        #! The incomplete expression from the bug report: `Cauchy(0.2,` used to be silently
+        #! swallowed to stderr when the button was clicked.
+        @test V("Cauchy(0.2,") != ""
+        @test V("Normal(1.0, -1.0)") != ""
+        @test V("run(`ls`)") != ""
+        #! Never throws, whatever it is handed.
+        for junk in ("", ")", "@#\$%", "1 2", "[1,2", "\"x", ";;;", "Normal(")
+            @test V(junk) isa String
+        end
+
+        good = ModelManagerStudio.get_target_path("config", "max_time")
+        @test B(good, "[1.0]") == ""
+        #! Each blocked case names its own reason.
+        @test occursin("parameter", B("", "[1.0]"))
+        @test occursin("Enter a value", B(good, ""))
+        @test B(good, "Cauchy(0.2,") != ""
+
+        #! The button predicate must agree with what create_variation actually does: if the
+        #! blocker is empty, creation must succeed; if not, it must refuse.
+        ModelManagerStudio.clear_variations()
+        @test ModelManagerStudio.create_variation(good, "[1.0]") == ""
+        @test length(ModelManagerStudio.get_current_variations()) == 1
+
+        n = length(ModelManagerStudio.get_current_variations())
+        @test ModelManagerStudio.create_variation(good, "Cauchy(0.2,") != ""
+        @test length(ModelManagerStudio.get_current_variations()) == n
+        ModelManagerStudio.clear_variations()
     end
 
     @testset "Variation delete and clear" begin

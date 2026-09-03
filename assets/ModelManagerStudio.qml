@@ -8,7 +8,18 @@ ApplicationWindow {
 
     property var fontSizeOfLevel: [20, 18, 14, 12, 10]
 
-    title: "PhysiCellModelManager.jl GUI"
+    // The highlight applied to an input location whose folder supports parameter variation.
+    // Defined once so the legend swatch and the location tiles cannot drift apart.
+    property color variedHighlight: "#d0e8ff"
+    property string variedMarker: "\u25C8"   // ◈ — a non-color cue, since color alone fails WCAG 1.4.1
+
+    // Breathing room added to a ComboBox on top of its own padding and indicator width.
+    // The token chain measures its widest entry with a hidden Text and sizes to that, but a
+    // Text's implicitWidth is the glyph run alone -- it accounts for neither the control's
+    // padding nor the drop-down indicator, so entries clipped ("apoptosis" -> "apoptosi").
+    property int comboTextSlack: 14
+
+    title: "ModelManagerStudio"
     width: 800
     height: 600
     visible: true
@@ -140,7 +151,7 @@ ApplicationWindow {
 
                                 width: columnLayout.implicitWidth + 10
                                 height: columnLayout.implicitHeight + 10 // padding/margin
-                                color: locationItem.isVaried ? "#d0e8ff" : "transparent"
+                                color: locationItem.isVaried ? mainWindow.variedHighlight : "transparent"
                                 radius: 4
                                 border.width: 1
                                 border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
@@ -154,9 +165,13 @@ ApplicationWindow {
                                     Text {
                                         id: labelTextItem
 
-                                        text: labelText
+                                        text: locationItem.isVaried ? (mainWindow.variedMarker + " " + labelText) : labelText
                                         font.bold: true
                                         font.pixelSize: mainWindow.fontSizeOfLevel[level]
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: locationItem.isVaried
+                                            ? (labelText + ", supports parameter variation")
+                                            : labelText
                                     }
 
                                     // ComboBox for selecting folder locations
@@ -184,6 +199,32 @@ ApplicationWindow {
 
                         }
 
+                    }
+
+                    // Legend: the highlight is otherwise unexplained, and it is the only
+                    // thing telling the user which locations can carry a variation.
+                    RowLayout {
+                        Layout.alignment: Qt.AlignCenter
+                        Layout.topMargin: 4
+                        spacing: 6
+
+                        Rectangle {
+                            width: 14
+                            height: 14
+                            radius: 3
+                            color: mainWindow.variedHighlight
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.variedHighlight, 1.2)
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        Text {
+                            text: mainWindow.variedMarker + " highlighted folders can be varied"
+                            color: syscolors.text
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            font.italic: true
+                            Layout.alignment: Qt.AlignVCenter
+                        }
                     }
 
                     // Required Locations
@@ -602,7 +643,9 @@ ApplicationWindow {
                                                 longestTextWidth = dummyTextItemLocation.implicitWidth;
                                             }
 
-                                            width: longestTextWidth + 50
+                                            width: longestTextWidth + leftPadding + rightPadding
+                                                   + (indicator ? indicator.width : 0)
+                                                   + mainWindow.comboTextSlack
                                             model: []
                                             // Use the colored delegate
                                             delegate: coloredItemDelegate
@@ -660,7 +703,9 @@ ApplicationWindow {
                                                 }
 
                                                 font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                                                width: longestTextWidth + 50
+                                                width: longestTextWidth + leftPadding + rightPadding
+                                                       + (indicator ? indicator.width : 0)
+                                                       + mainWindow.comboTextSlack
                                                 model: []
                                                 // Layout.preferredWidth: 120
                                                 Layout.fillWidth: true
@@ -764,6 +809,7 @@ ApplicationWindow {
                                         width: implicitWidth
                                         onTextChanged: {
                                             createVariationButton.text = Julia.variation_exists(currentVariationTargetText.text) ? "Edit Variation" : "Create Variation";
+                                            variationValuesInput.refreshBlocker();
                                         }
                                     }
 
@@ -817,6 +863,17 @@ ApplicationWindow {
                                     TextInput {
                                         id: variationValuesInput
 
+                                        // Why the variation cannot be created right now; "" when it can.
+                                        // Recomputed on every keystroke so the button's disabled state always
+                                        // has a stated reason, instead of a click that silently does nothing.
+                                        property string blocker: ""
+
+                                        function refreshBlocker() {
+                                            blocker = Julia.variation_blocker(currentVariationTargetText.text, text);
+                                        }
+
+                                        onTextChanged: refreshBlocker()
+
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.leftMargin: 10
@@ -833,7 +890,7 @@ ApplicationWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         // anchors.fill: parent
                                         anchors.leftMargin: 10
-                                        text: "e.g. 0.1:0.2:0.5, [1.0, 1.2, 1.5]"
+                                        text: "e.g. 0.1:0.2:0.5, [1.0, 1.2, 1.5], Normal(1.0, 0.2)"
                                         color: "#888888"
                                         font.pixelSize: mainWindow.fontSizeOfLevel[3]
                                         verticalAlignment: Text.AlignVCenter
@@ -865,7 +922,12 @@ ApplicationWindow {
                             Layout.preferredHeight: 40
                             text: "Create Variation"
                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                            enabled: currentVariationTargetText.text !== "" && variationValuesInput.text !== ""
+                            // Gated on the SAME predicate the Julia side uses, so the button
+                            // cannot be enabled for something create_variation will refuse.
+                            enabled: variationValuesInput.blocker === ""
+                            // The reason, on hover, for anyone wondering why it is greyed out.
+                            ToolTip.visible: hovered && !enabled && variationValuesInput.blocker !== ""
+                            ToolTip.text: variationValuesInput.blocker
                             onClicked: {
                                 var tokens = [currentVariationTargetText.text, variationValuesInput.text];
                                 for (let i = 0; i < tokenComboBoxRepeater.count; ++i) {
@@ -875,12 +937,32 @@ ApplicationWindow {
 
                                     tokens.push(text);
                                 }
-                                Julia.create_variation.apply(Julia, tokens);
+                                // "" means it worked. Anything else is a failure the live check
+                                // could not catch, and must be shown rather than sent to stderr.
+                                var err = Julia.create_variation.apply(Julia, tokens);
+                                if (err !== "" && err !== undefined) {
+                                    variationErrorDialog.message = err;
+                                    variationErrorDialog.open();
+                                    return;
+                                }
                                 currentVariationsFlickable.currentVariations = Julia.get_current_variations();
                                 text = "Edit Variation"; // Change button text to indicate edit mode
                             }
                         }
 
+                    }
+
+                    // Why the variation cannot be created, stated inline rather than left to
+                    // stderr. This is the GUI's first error surface; without it a click on a
+                    // disabled-but-not-obviously-disabled button looked like nothing happening.
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 4
+                        text: variationValuesInput.blocker
+                        visible: text !== "" && variationValuesInput.text !== ""
+                        color: "#a32a26"
+                        font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                        wrapMode: Text.Wrap
                     }
 
                     // Display current variations
@@ -1026,6 +1108,25 @@ ApplicationWindow {
 
         }
 
+    }
+
+    Dialog {
+        id: variationErrorDialog
+
+        property string message: ""
+
+        anchors.centerIn: parent
+        modal: true
+        title: "Could not create the variation"
+        standardButtons: Dialog.Ok
+        width: Math.min(520, mainWindow.width - 80)
+
+        Text {
+            width: parent ? parent.width : 400
+            text: variationErrorDialog.message
+            wrapMode: Text.Wrap
+            font.pixelSize: mainWindow.fontSizeOfLevel[3]
+        }
     }
 
     JuliaSignals {

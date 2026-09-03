@@ -77,6 +77,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
     @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
     @qmlfunction is_resolvable_target delete_variation clear_variations allowed_distribution_names
+    @qmlfunction value_spec_error variation_blocker
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
@@ -104,9 +105,37 @@ Internal function to initialize the Model Manager with the specified arguments.
 Called by [`init_model_manager_gui`](@ref).
 """
 function studio_initialize_model_manager(args::Vararg{AbstractString})
+    #! With no arguments, adopt whatever project is already initialized rather than
+    #! re-initializing from the working directory. This matters because the simulator package
+    #! attempts initialization in its own `__init__`, and a user may also have called
+    #! `initializeModelManager("path/to/project")` explicitly before launching. Deriving paths
+    #! from `pwd()` in that situation would point Studio at a different project than the one
+    #! the session is actually using -- or fail outright, from a directory that is perfectly
+    #! valid to launch from.
+    #!
+    #! Explicit arguments always win: passing a path means you mean it.
+    if isempty(args) && _model_manager_is_initialized()
+        model_manager_studio_info("Using the already-initialized project at $(MM.dataDir()).")
+        return true
+    end
+
     path_to_physicell, path_to_data = get_pcmm_paths(args...)
     initializeModelManager(path_to_physicell, path_to_data)
-    return PhysiCellModelManager.isInitialized()
+    return _model_manager_is_initialized()
+end
+
+"""
+    _model_manager_is_initialized()
+
+Whether a project is currently initialized, without assuming a simulator has registered.
+
+`ModelManager.isInitialized` reads `mm_globals()`, which asserts when no simulator package has
+populated `mm_globals_ref[]` — so calling it unguarded turns "no backend loaded" into an
+`AssertionError` rather than a `false`.
+"""
+function _model_manager_is_initialized()
+    isnothing(MM.mm_globals_ref[]) && return false
+    return MM.isInitialized()
 end
 
 """
@@ -551,6 +580,40 @@ function get_config_path(tokens::Vararg{AbstractString})
     return s
 end
 
+"""
+    value_spec_error(spec::AbstractString)
+
+Return `""` if `spec` is a usable variation value, or a message explaining why it is not.
+Never throws. Called from QML on every keystroke so the Create/Edit button can be disabled
+with a stated reason instead of silently doing nothing when clicked.
+
+An empty `spec` is "incomplete", not "wrong", and returns `""` — the button is already gated
+on non-empty text, and showing an error before the user has typed anything is noise.
+"""
+function value_spec_error(spec::AbstractString)
+    isempty(strip(String(spec))) && return ""
+    try
+        parse_value_spec(spec)
+        return ""
+    catch e
+        e isa ValueSpecError || rethrow()
+        return sprint(showerror, e)
+    end
+end
+
+"""
+    variation_blocker(target::AbstractString, vals::AbstractString)
+
+Return `""` when a variation can be created from `target` and `vals`, or the reason it cannot.
+The single predicate behind the button's enabled state, so the UI cannot disagree with what
+[`create_variation`](@ref) will actually accept.
+"""
+function variation_blocker(target::AbstractString, vals::AbstractString)
+    is_resolvable_target(target) || return "Finish choosing a parameter."
+    isempty(strip(String(vals))) && return "Enter a value, list, range, or distribution."
+    return value_spec_error(vals)
+end
+
 function create_variation(target::AbstractString, vals::AbstractString, tokens::Vararg{AbstractString})
     global tokens_avs
     tokens = [t for t in String.(tokens) if !isempty(t)]
@@ -561,8 +624,9 @@ function create_variation(target::AbstractString, vals::AbstractString, tokens::
     #! perfectly valid-looking ElementaryVariation that is written to the transcript and fails
     #! only once the simulation runs.
     if !is_resolvable_target(target)
-        model_manager_studio_error("Cannot create a variation: \"$(target)\" is not a parameter path. Finish choosing a parameter first.")
-        return
+        msg = "Cannot create a variation: \"$(target)\" is not a parameter path. Finish choosing a parameter first."
+        model_manager_studio_error(msg)
+        return msg
     end
 
     target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
@@ -570,8 +634,9 @@ function create_variation(target::AbstractString, vals::AbstractString, tokens::
         vals = parse_value_spec(vals)
     catch e
         e isa ValueSpecError || rethrow()
-        model_manager_studio_error("Could not use that value: $(sprint(showerror, e))")
-        return
+        msg = "Could not use that value: $(sprint(showerror, e))"
+        model_manager_studio_error(msg)
+        return msg
     end
     if vals isa AbstractVector
         vals = collect(vals)
@@ -583,6 +648,9 @@ function create_variation(target::AbstractString, vals::AbstractString, tokens::
         tokens_avs[ind] = (tokens, ElementaryVariation(target, vals))
     end
     record_variations()
+    #! "" means success. QML shows a dialog when this comes back non-empty, so a failure is
+    #! visible in the window rather than only on stderr, which a windowed app cannot show.
+    return ""
 end
 
 function get_current_variations()
