@@ -337,7 +337,14 @@ function config_third_tokens(first_token::AbstractString, second_token::Abstract
     elseif second_token ∈ ["adhesion", "phagocytosis", "fusion", "transformation", "attack_rate"]
         return get_cell_type_names()
     elseif second_token == "motility"
-        return ["speed"; "persistence_time"; "migration_bias"; "enabled"; "use_2D"]
+        #! `enabled` and `use_2D` ONLY. PCMM's three-token form is deliberately the options
+        #! accessor -- `configPath(ct, "motility", tag)` is `motilityPath(ct, "options", tag)`
+        #! -- and in PhysiCell's schema only those two live under <options>. Offering
+        #! speed/persistence_time/migration_bias here produced motility/options/<tag>, which
+        #! does not exist in the document: the GUI built a variation from it and the failure
+        #! surfaced only when the simulation ran. Those three are already offered one level
+        #! up, where PCMM maps them to motility/<tag>.
+        return ["enabled"; "use_2D"]
     elseif second_token == "chemotaxis"
         return ["enabled"; "substrate"; "direction"]
     elseif second_token == "advanced_chemotaxis"

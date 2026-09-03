@@ -93,6 +93,46 @@ createProject()
         end
     end
 
+    @testset "Offered tokens resolve to real XML" begin
+        #! Every chain the browser offers must resolve to an element that actually exists.
+        #! Nothing structurally forces get_tokens and get_target_path to agree, so this has
+        #! to be asserted -- it is how the motility submenu was caught offering
+        #! speed/persistence_time/migration_bias, which PCMM maps under motility/options/
+        #! where they do not exist.
+        doc = parse_file(MM.prepareBaseFile(ModelManagerStudio.inputs[:config]))
+        try
+            bad = String[]
+            function check(chain)
+                t = ModelManagerStudio.get_target_path("config", chain...)
+                ModelManagerStudio.is_resolvable_target(t) || return
+                if MM.retrieveElement(doc, MM.columnNameToXMLPath(String(t)); required=false) === nothing
+                    push!(bad, join(chain, " > ") * "  ->  " * String(t))
+                end
+            end
+
+            ct = first(ModelManagerStudio.get_cell_type_names())
+            #! Spot-check the branches with a known shape rather than the whole tree, which
+            #! re-parses the XML on every call and is far too slow for the suite until the
+            #! parameter browser caches documents per location.
+            for t2 in ("motility", "cycle", "apoptosis", "necrosis")
+                for t3 in ModelManagerStudio.get_tokens("config", [ct, t2])
+                    t4s = ModelManagerStudio.get_tokens("config", [ct, t2, t3])
+                    isempty(t4s) ? check([ct, t2, t3]) : foreach(t4 -> check([ct, t2, t3, t4]), t4s)
+                end
+            end
+            for t2 in ("speed", "persistence_time", "migration_bias", "total", "damage_rate")
+                check([ct, t2])
+            end
+
+            for b in bad
+                @info "unresolvable chain: $b"
+            end
+            @test isempty(bad)
+        finally
+            free(doc)
+        end
+    end
+
     @testset "Walker emits resolvable tokens" begin
         #! Unit-tested on a hand-built document rather than through the project, so the
         #! result cannot depend on which optional input folders happen to be selected.
