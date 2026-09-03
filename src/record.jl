@@ -66,7 +66,7 @@ function record_variations()
     for token_av in tokens_avs
         avs_text *= """
 
-        xml_path = $(PhysiCellModelManager.variationTarget(token_av[2]).xml_path)
+        xml_path = $(MM.variationTarget(token_av[2]).xml_path)
         val = $(value_string(token_av[2]))
         push!(avs, ElementaryVariation(xml_path, val))
         """
@@ -101,7 +101,7 @@ function record_run()
     last_record = :run
 end
 
-value_string(dv::DiscreteVariation) = PhysiCellModelManager.variationValues(dv)
+value_string(dv::DiscreteVariation) = MM.variationValues(dv)
 
 function value_string(dv::DistributedVariation)
     d = dv.distribution
