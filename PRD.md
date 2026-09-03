@@ -62,8 +62,23 @@ Three commitments shape every feature:
 
 **Behavior.** After choosing a varied location, the user narrows through a chain of dropdowns until the path resolves to a single parameter, whose target path is displayed.
 
+**Children and shortcuts.** A level offers two kinds of entry: **children**, mirroring the
+document's own nesting, and **shortcuts**, surfacing a parameter where a user looks for it rather
+than where the XML puts it. After choosing `motility`, `speed` belongs in the menu even though the
+XML nests it outside `<options>`.
+
+Studio does not hand-curate which shortcuts are valid. It offers both kinds and **filters by
+whether the chain resolves** against the base file. A shortcut the backend cannot yet resolve
+simply does not appear, and starts appearing once it can — so Studio tracks the simulator instead
+of needing a patch each time the backend's path mapping changes. Branch tokens are always kept:
+an intermediate chain has no target, so resolvability says nothing about it.
+
 **Acceptance criteria.**
 - The chain **terminates**: once the path bottoms out, the next call returns `String[]`.
+- Every token offered *to the user* resolves to an element that exists. The raw vocabulary may
+  over-offer; the filter is what makes the guarantee.
+- Base documents are cached per location and freed when the input folders change. Resolvability
+  filtering is per-token, so uncached parsing would make it unaffordable.
 - A colon-bearing token has **exactly two** colons (`tag:attr:value`).
 - Token ordering is stable across calls — document order, not hash order.
 - The resolved target round-trips: `columnName(XMLPath(columnNameToXMLPath(target))) == target`.

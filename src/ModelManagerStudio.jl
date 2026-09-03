@@ -23,6 +23,7 @@ import ModelManager as MM
 export launch, main
 
 include("colors.jl")
+include("base_documents.jl")
 include("value_parser.jl")
 include("record.jl")
 #! Unconditional: main.jl itself chooses between the `@main` entrypoint (1.11+) and a plain
@@ -34,6 +35,12 @@ global current_required_locations
 global current_optional_locations
 global inputs
 global tokens_avs = Tuple[]
+
+#! What a vocabulary helper returns when its base document is unavailable — an unselected
+#! folder, a location this project does not have, or a file the simulator cannot prepare.
+#! Returning empty rather than throwing keeps a missing optional input from propagating an
+#! exception out of a QML callback.
+const EMPTY_VOCABULARY = String[]
 
 
 """
@@ -177,6 +184,9 @@ function set_input_folders()
 
     inputs = InputFolders(; kwargs...)
 
+    #! Documents cached against the previous selection are now stale.
+    invalidate_base_documents!()
+
     model_manager_studio_info(string(inputs))
 
     record_inputs()
@@ -193,8 +203,8 @@ end
 
 function get_substrate_names()
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     microenvironment_element = PhysiCellModelManager.retrieveElement(xml_doc, ["microenvironment_setup"])
     substrate_names = String[]
     for ce in get_elements_by_tagname(microenvironment_element, "variable")
@@ -205,8 +215,8 @@ end
 
 function get_cell_type_names()
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     cell_types_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions"])
     cell_type_names = String[]
     for ce in get_elements_by_tagname(cell_types_element, "cell_definition")
@@ -217,23 +227,24 @@ end
 
 function get_custom_tags()
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     return [name(ce) for ce in (PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions", "cell_definition", "custom_data"]) |> child_elements)]
 end
 
 function get_user_parameter_names()
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     user_parameters_element = PhysiCellModelManager.retrieveElement(xml_doc, ["user_parameters"])
     return [name(ce) for ce in child_elements(user_parameters_element)]
 end
 
 function get_cycle_model_phase_tag(cell_type::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    #! Scalar, not a vector: "" means "unknown", and config_third_tokens drops it.
+    isnothing(xml_doc) && return ""
     cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type))
     is_rate = find_element(cycle_model_element, "phase_durations") |> isnothing
     return is_rate ? "rate" : "duration"
@@ -241,8 +252,8 @@ end
 
 function get_cycle_model_phase_indexes(cell_type::AbstractString, cycle_model_phase_tag::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     if cycle_model_phase_tag == "rate"
         tag = "phase_transition_rates"
         attr_name = "start_index"
@@ -256,8 +267,8 @@ end
 
 function get_death_model_phase_tag(cell_type::AbstractString, death_model::Symbol)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     death_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.deathPath(cell_type, "model:name:$(death_model)"))
     is_rate = find_element(death_model_element, "phase_durations") |> isnothing
     base_name = is_rate ? "transition_rate" : "duration"
@@ -270,8 +281,8 @@ end
 
 function get_initial_parameter_distribution_behaviors(cell_type::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions"))
     behaviors = String[]
     for ce in get_elements_by_tagname(initial_parameter_distribution_element, "distribution")
@@ -283,8 +294,8 @@ end
 
 function get_initial_parameter_distribution_behavior_tags(cell_type::AbstractString, behavior::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:config)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions", "distribution::behavior:$(behavior)"))
     return [n for n in (initial_parameter_distribution_element |> child_elements .|> name) if n != "behavior"]
 end
@@ -337,14 +348,17 @@ function config_third_tokens(first_token::AbstractString, second_token::Abstract
     elseif second_token ∈ ["adhesion", "phagocytosis", "fusion", "transformation", "attack_rate"]
         return get_cell_type_names()
     elseif second_token == "motility"
-        #! `enabled` and `use_2D` ONLY. PCMM's three-token form is deliberately the options
-        #! accessor -- `configPath(ct, "motility", tag)` is `motilityPath(ct, "options", tag)`
-        #! -- and in PhysiCell's schema only those two live under <options>. Offering
-        #! speed/persistence_time/migration_bias here produced motility/options/<tag>, which
-        #! does not exist in the document: the GUI built a variation from it and the failure
-        #! surfaced only when the simulation ran. Those three are already offered one level
-        #! up, where PCMM maps them to motility/<tag>.
-        return ["enabled"; "use_2D"]
+        #! Children AND shortcuts. `enabled` and `use_2D` are the real <options> children;
+        #! speed, persistence_time and migration_bias belong to <motility> itself but are the
+        #! parameters a user looks for after picking "motility", so offering them here is the
+        #! right affordance even though the XML nests them differently.
+        #!
+        #! Whether they actually appear is decided by `_resolvable_tokens`, not by this list:
+        #! against PCMM 0.3.3 `configPath(ct, "motility", "speed")` maps to
+        #! motility/options/speed, which does not exist, so the three are filtered out. When
+        #! PCMM learns to map them to motility/speed they resolve and appear on their own,
+        #! with no change here.
+        return ["speed"; "persistence_time"; "migration_bias"; "enabled"; "use_2D"]
     elseif second_token == "chemotaxis"
         return ["enabled"; "substrate"; "direction"]
     elseif second_token == "advanced_chemotaxis"
@@ -354,7 +368,8 @@ function config_third_tokens(first_token::AbstractString, second_token::Abstract
     elseif second_token == "custom"
         return get_custom_tags()
     elseif second_token == "cycle"
-        return [get_cycle_model_phase_tag(first_token)]
+        tag = get_cycle_model_phase_tag(first_token)
+        return isempty(tag) ? String[] : [tag]
     elseif second_token == "initial_parameter_distribution"
         return get_initial_parameter_distribution_behaviors(first_token)
     else
@@ -375,7 +390,56 @@ end
 function get_next_model(tokens::Vararg{AbstractString})
     tokens = [String.(tokens)...]
     location = popfirst!(tokens)
-    return get_tokens(String(location), tokens)
+    return _resolvable_tokens(String(location), tokens, get_tokens(String(location), tokens))
+end
+
+"""
+    _resolvable_tokens(location, chain, candidates)
+
+Drop candidates that lead nowhere, keeping those that open a further menu or name a parameter
+that exists in the base file.
+
+The token lists deliberately mix two kinds of entry: **children**, which mirror the document's
+own nesting, and **shortcuts**, which surface a parameter where a user will look for it rather
+than where the XML happens to put it. Nothing forces either kind to resolve — the vocabulary and
+the path builder are separate functions that can disagree — and an unresolvable token is worse
+than a missing one, because the GUI will build a variation from it that fails only when the
+simulation runs.
+
+Filtering here rather than curating each list by hand means Studio tracks the simulator: a
+shortcut the backend cannot yet resolve simply does not appear, and starts appearing once it can.
+
+A candidate that leads to further choices is always kept — an intermediate chain has no target
+of its own, so resolvability says nothing about it.
+"""
+function _resolvable_tokens(location::AbstractString, chain::Vector{String}, candidates)
+    isempty(candidates) && return String[]
+    loc = Symbol(location)
+    loc in MM.projectLocations().all || return collect(candidates)
+    isnothing(base_document(loc)) && return collect(candidates)
+
+    kept = String[]
+    for candidate in candidates
+        next_chain = [chain; String(candidate)]
+
+        #! Opens another menu: keep it, and let the deeper level do its own filtering.
+        if !isempty(get_tokens(location, next_chain))
+            push!(kept, String(candidate))
+            continue
+        end
+
+        target = get_target_path(location, next_chain...)
+        if !is_resolvable_target(target)
+            model_manager_studio_debug("Dropping \"$(join(next_chain, " > "))\": no path could be built.")
+            continue
+        end
+        if isnothing(base_element(loc, MM.columnNameToXMLPath(String(target))))
+            model_manager_studio_debug("Dropping \"$(join(next_chain, " > "))\": $(target) is not in the base file.")
+            continue
+        end
+        push!(kept, String(candidate))
+    end
+    return kept
 end
 
 function get_tokens(location::AbstractString, previous_tokens::Vector{String})
@@ -430,8 +494,8 @@ end
 
 function get_ruled_behaviors(cell_type::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:rulesets_collection)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"]; required=false)
     if isnothing(rules_element)
         model_manager_studio_info("No behavior ruleset found for cell type: $cell_type")
@@ -442,24 +506,24 @@ end
 
 function get_next_rule_tags(tokens::Vararg{AbstractString})
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:rulesets_collection)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(tokens[1])"; "behavior:name:$(tokens[2])"; tokens[3:end]...])
     return get_next_xml_path_elements(rules_element, ["name"])
 end
 
 function get_patch_types(cell_type::AbstractString)
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:ic_cell)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(cell_type)"])
     return [attribute(ce, "type") for ce in get_elements_by_tagname(ic_element, "patch_collection")]
 end
 
 function get_next_ic_cell_tags(tokens::Vararg{AbstractString})
     global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
-    xml_doc = parse_file(path_to_xml)
+    xml_doc = base_document(:ic_cell)
+    isnothing(xml_doc) && return EMPTY_VOCABULARY
     ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(tokens[1])"; "patch_collection:type:$(tokens[2])"; String.(tokens[3:end])...])
     return get_next_xml_path_elements(ic_element, ["type", "ID"])
 end

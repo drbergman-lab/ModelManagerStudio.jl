@@ -93,12 +93,73 @@ createProject()
         end
     end
 
+    @testset "Unresolvable tokens are filtered, not curated away" begin
+        ct = first(ModelManagerStudio.get_cell_type_names())
+
+        #! The vocabulary offers children AND shortcuts; the filter decides what survives.
+        raw = ModelManagerStudio.get_tokens("config", [ct, "motility"])
+        @test "speed" in raw
+        @test "enabled" in raw
+
+        #! Against PCMM 0.3.3, configPath maps the three-token motility form under
+        #! motility/options/, where speed/persistence_time/migration_bias do not exist -- so
+        #! they are dropped. When PCMM maps them to motility/<tag> they resolve and reappear
+        #! with no change here, which is the point of filtering rather than hand-curating.
+        filtered = ModelManagerStudio.get_next_model("config", ct, "motility")
+        @test "enabled" in filtered
+        @test "use_2D" in filtered
+        @test issubset(Set(filtered), Set(raw))
+
+        #! Not over-filtering: the shortcuts remain valid one level up, where PCMM maps them
+        #! to motility/<tag>, and branch tokens that open further menus are always kept.
+        second = ModelManagerStudio.get_next_model("config", ct)
+        @test "speed" in second
+        @test "persistence_time" in second
+        @test "migration_bias" in second
+        @test "cycle" in second          # a branch, kept regardless of its own resolvability
+        @test length(second) > 20        # the filter has not gutted the menu
+
+        #! Whatever survives must resolve -- that is the invariant the filter exists to hold.
+        doc = parse_file(MM.prepareBaseFile(ModelManagerStudio.inputs[:config]))
+        try
+            for tok in ModelManagerStudio.get_next_model("config", ct, "motility")
+                t = ModelManagerStudio.get_target_path("config", ct, "motility", tok)
+                @test ModelManagerStudio.is_resolvable_target(t)
+                @test MM.retrieveElement(doc, MM.columnNameToXMLPath(String(t)); required=false) !== nothing
+            end
+        finally
+            free(doc)
+        end
+    end
+
+    @testset "Base documents are cached and invalidated" begin
+        #! Thirteen helpers each used to parse the config afresh, and none freed it. The cache
+        #! makes repeated vocabulary lookups cheap enough for the resolvability filter to run
+        #! on every menu.
+        d1 = ModelManagerStudio.base_document(:config)
+        d2 = ModelManagerStudio.base_document(:config)
+        @test d1 !== nothing
+        @test d1 === d2                      # same document, not re-parsed
+
+        #! Unknown or unselected locations yield nothing rather than throwing out of a
+        #! QML callback -- prepareBaseFile asserts from inside the simulator's dependencies.
+        @test ModelManagerStudio.base_document(:not_a_location) === nothing
+        @test ModelManagerStudio.base_element(:not_a_location, ["anything"]) === nothing
+        @test ModelManagerStudio.base_element(:config, ["no", "such", "path"]) === nothing
+        @test ModelManagerStudio.base_element(:config, ["overall"]) !== nothing
+
+        ModelManagerStudio.invalidate_base_documents!()
+        d3 = ModelManagerStudio.base_document(:config)
+        @test d3 !== nothing
+        @test ModelManagerStudio.base_element(:config, ["overall"]) !== nothing
+    end
+
     @testset "Offered tokens resolve to real XML" begin
-        #! Every chain the browser offers must resolve to an element that actually exists.
-        #! Nothing structurally forces get_tokens and get_target_path to agree, so this has
-        #! to be asserted -- it is how the motility submenu was caught offering
-        #! speed/persistence_time/migration_bias, which PCMM maps under motility/options/
-        #! where they do not exist.
+        #! Every chain the browser offers THE USER must resolve to an element that exists.
+        #! Walk `get_next_model`, not `get_tokens`: the raw vocabulary deliberately
+        #! over-offers (children plus shortcuts) and `_resolvable_tokens` is what makes the
+        #! guarantee. Asserting on the raw list would forbid the over-offering that lets a
+        #! shortcut start working the moment the backend can resolve it.
         doc = parse_file(MM.prepareBaseFile(ModelManagerStudio.inputs[:config]))
         try
             bad = String[]
@@ -115,8 +176,8 @@ createProject()
             #! re-parses the XML on every call and is far too slow for the suite until the
             #! parameter browser caches documents per location.
             for t2 in ("motility", "cycle", "apoptosis", "necrosis")
-                for t3 in ModelManagerStudio.get_tokens("config", [ct, t2])
-                    t4s = ModelManagerStudio.get_tokens("config", [ct, t2, t3])
+                for t3 in ModelManagerStudio.get_next_model("config", ct, t2)
+                    t4s = ModelManagerStudio.get_next_model("config", ct, t2, t3)
                     isempty(t4s) ? check([ct, t2, t3]) : foreach(t4 -> check([ct, t2, t3, t4]), t4s)
                 end
             end
