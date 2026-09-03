@@ -208,21 +208,32 @@ ApplicationWindow {
                         Layout.topMargin: 4
                         spacing: 6
 
+                        // The swatch carries the glyph, so it is a miniature of an actual
+                        // varied tile rather than two separate cues sitting next to a
+                        // sentence that has to explain both.
                         Rectangle {
-                            width: 14
-                            height: 14
+                            width: legendGlyph.implicitWidth + 8
+                            height: legendGlyph.implicitHeight + 4
                             radius: 3
                             color: mainWindow.variedHighlight
                             border.width: 1
                             border.color: Qt.darker(mainWindow.variedHighlight, 1.2)
                             Layout.alignment: Qt.AlignVCenter
+
+                            Text {
+                                id: legendGlyph
+
+                                anchors.centerIn: parent
+                                text: mainWindow.variedMarker
+                                color: syscolors.text
+                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            }
                         }
 
                         Text {
-                            text: mainWindow.variedMarker + " highlighted folders can be varied"
+                            text: "folders that can be varied"
                             color: syscolors.text
                             font.pixelSize: mainWindow.fontSizeOfLevel[4]
-                            font.italic: true
                             Layout.alignment: Qt.AlignVCenter
                         }
                     }
@@ -675,6 +686,21 @@ ApplicationWindow {
                                                 id: tokenComboBox
 
                                                 property int longestTextWidth: 0
+                                                // Heading and branch/leaf per entry, index-parallel to `model`.
+                                                // Fetched together with the model so the three cannot drift.
+                                                property var itemGroups: []
+                                                property var itemKinds: []
+
+                                                // The chain UP TO this ComboBox is what produced its model, so
+                                                // the same chain yields this level's headings and kinds.
+                                                function refreshMeta() {
+                                                    var toks = [variedLocationComboBox.currentText];
+                                                    for (let i = 0; i < index; ++i) {
+                                                        toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
+                                                    }
+                                                    itemGroups = Julia.get_token_groups.apply(Julia, toks);
+                                                    itemKinds = Julia.get_token_kinds.apply(Julia, toks);
+                                                }
 
                                                 function updateLongestTextWidth() {
                                                     let longest = "";
@@ -709,14 +735,77 @@ ApplicationWindow {
                                                 model: []
                                                 // Layout.preferredWidth: 120
                                                 Layout.fillWidth: true
-                                                // Use the colored delegate
-                                                delegate: coloredItemDelegate
+                                                delegate: ItemDelegate {
+                                                    id: tokenItem
+
+                                                    property string groupLabel: index < tokenComboBox.itemGroups.length ? tokenComboBox.itemGroups[index] : ""
+                                                    property string previousGroup: (index > 0 && index - 1 < tokenComboBox.itemGroups.length) ? tokenComboBox.itemGroups[index - 1] : ""
+                                                    // A heading is drawn on the FIRST entry of each run, which is
+                                                    // why the token list is ordered so each group is contiguous.
+                                                    property bool showsHeading: groupLabel !== "" && groupLabel !== previousGroup
+                                                    property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
+
+                                                    width: ListView.view ? ListView.view.width : implicitWidth
+
+                                                    contentItem: Column {
+                                                        spacing: 2
+
+                                                        Text {
+                                                            visible: tokenItem.showsHeading
+                                                            height: visible ? implicitHeight + 4 : 0
+                                                            text: tokenItem.groupLabel
+                                                            color: "#6b7787"
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                            font.bold: true
+                                                            font.capitalization: Font.AllUppercase
+                                                        }
+
+                                                        Row {
+                                                            spacing: 8
+                                                            width: parent.width
+
+                                                            Text {
+                                                                width: parent.width - (tokenItem.opensMenu ? 18 : 0)
+                                                                text: modelData
+                                                                color: {
+                                                                    const itemType = variationRowLayout.getItemType(modelData);
+                                                                    if (itemType === "substrate")
+                                                                        return "#2060A0";
+
+                                                                    if (itemType === "cell_type")
+                                                                        return "#206020";
+
+                                                                    if (itemType === "custom")
+                                                                        return "#A02020";
+
+                                                                    return "#000000";
+                                                                }
+                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                                elide: Text.ElideRight
+                                                                verticalAlignment: Text.AlignVCenter
+                                                            }
+
+                                                            // Marks an entry that leads to another menu rather than
+                                                            // being the parameter itself -- the flat list hid that.
+                                                            Text {
+                                                                visible: tokenItem.opensMenu
+                                                                text: "\u203a"
+                                                                color: "#6b7787"
+                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                                verticalAlignment: Text.AlignVCenter
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                                 onModelChanged: {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
+                                                        itemGroups = [];
+                                                        itemKinds = [];
                                                         return ;
                                                     }
                                                     updateLongestTextWidth();
+                                                    refreshMeta();
                                                     updateNextComboBox();
                                                 }
                                                 onCurrentTextChanged: {

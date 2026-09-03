@@ -84,7 +84,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
     @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
     @qmlfunction is_resolvable_target delete_variation clear_variations allowed_distribution_names
-    @qmlfunction value_spec_error variation_blocker
+    @qmlfunction value_spec_error variation_blocker get_token_groups get_token_kinds
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
@@ -390,7 +390,114 @@ end
 function get_next_model(tokens::Vararg{AbstractString})
     tokens = [String.(tokens)...]
     location = popfirst!(tokens)
-    return _resolvable_tokens(String(location), tokens, get_tokens(String(location), tokens))
+    kept = _resolvable_tokens(String(location), tokens, get_tokens(String(location), tokens))
+    return _grouped_order(String(location), tokens, kept)
+end
+
+#! Semantic grouping for the token menus.
+#!
+#! The token lists were always grouped -- one phenotype section per source line -- but the
+#! grouping died at the `Vector{String}` boundary, so the menu read as arbitrary. Worse, the
+#! list mixes entries that open another menu with entries that ARE the parameter, and nothing
+#! distinguished them.
+#!
+#! This table is PhysiCell vocabulary and belongs in the simulator extension alongside the
+#! `config_*_tokens` cascade it labels. It lives here for now because that cascade does.
+const CONFIG_TOKEN_GROUPS = Dict{String,String}(
+    "cycle" => "Cycle & death", "apoptosis" => "Cycle & death", "necrosis" => "Cycle & death",
+
+    "adhesion" => "Cell interactions", "phagocytosis" => "Cell interactions",
+    "fusion" => "Cell interactions", "transformation" => "Cell interactions",
+    "attack_rate" => "Cell interactions",
+    "apoptotic_phagocytosis_rate" => "Cell interactions",
+    "necrotic_phagocytosis_rate" => "Cell interactions",
+    "other_dead_phagocytosis_rate" => "Cell interactions",
+    "attack_damage_rate" => "Cell interactions", "attack_duration" => "Cell interactions",
+
+    "motility" => "Motility", "chemotaxis" => "Motility", "advanced_chemotaxis" => "Motility",
+    "speed" => "Motility", "persistence_time" => "Motility", "migration_bias" => "Motility",
+    "enabled" => "Motility", "use_2D" => "Motility",
+
+    "total" => "Volume", "fluid_fraction" => "Volume", "nuclear" => "Volume",
+    "fluid_change_rate" => "Volume", "cytoplasmic_biomass_change_rate" => "Volume",
+    "nuclear_biomass_change_rate" => "Volume", "calcified_fraction" => "Volume",
+    "calcification_rate" => "Volume", "relative_rupture_volume" => "Volume",
+
+    "set_relative_equilibrium_distance" => "Mechanics",
+    "set_absolute_equilibrium_distance" => "Mechanics",
+
+    "damage_rate" => "Integrity", "damage_repair_rate" => "Integrity",
+
+    "initial_parameter_distribution" => "Distributions",
+)
+
+"""
+    token_group(location, chain, token)
+
+The heading a token belongs under, or `""` for no heading.
+
+Substrate and cell-type names are recognized dynamically rather than tabulated, because they
+come from the user's own model.
+"""
+function token_group(location::AbstractString, chain::Vector{String}, token::AbstractString)
+    location == "config" || return ""
+    t = String(token)
+    startswith(t, "custom:") && return "Custom data"
+    haskey(CONFIG_TOKEN_GROUPS, t) && return CONFIG_TOKEN_GROUPS[t]
+    #! At the top level a bare name is a cell type or a substrate; one level in, under a cell
+    #! type, a substrate name means that cell's secretion/uptake of it.
+    t in get_substrate_names() && return isempty(chain) ? "Substrates" : "Secretion & uptake"
+    t in get_cell_type_names() && return isempty(chain) ? "Cell types" : "Targets"
+    return "Other"
+end
+
+#! Heading order. The source lists were grouped, but not contiguously -- "Motility" appeared
+#! once for the motility/chemotaxis branches and again twenty entries later for the speed and
+#! migration_bias shortcuts, and "Cell interactions" likewise. Headings need each group in one
+#! run, so the tokens are ordered by group before they leave for QML. Ordering is stable, so
+#! entries keep their authored order within a group.
+const CONFIG_GROUP_ORDER = ["Cell types", "Substrates", "Secretion & uptake", "Cycle & death",
+                            "Motility", "Mechanics", "Volume", "Cell interactions", "Integrity",
+                            "Targets", "Custom data", "Distributions", "Other", ""]
+
+"""
+    _grouped_order(location, chain, tokens)
+
+Reorder `tokens` so every group forms one contiguous run, preserving the authored order inside
+each group. Locations with no grouping are returned untouched.
+"""
+function _grouped_order(location::AbstractString, chain::Vector{String}, tokens::Vector{String})
+    location == "config" || return tokens
+    length(tokens) < 2 && return tokens
+    rank = Dict(g => i for (i, g) in enumerate(CONFIG_GROUP_ORDER))
+    fallback = length(CONFIG_GROUP_ORDER) + 1
+    return sort(tokens; by=t -> get(rank, token_group(location, chain, t), fallback), alg=MergeSort)
+end
+
+"""
+    get_token_groups(tokens::Vararg{AbstractString})
+
+Group headings parallel to [`get_next_model`](@ref). Called from QML, which draws a heading
+wherever this changes between adjacent entries.
+"""
+function get_token_groups(tokens::Vararg{AbstractString})
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    return [token_group(location, toks, t) for t in get_next_model(String(location), toks...)]
+end
+
+"""
+    get_token_kinds(tokens::Vararg{AbstractString})
+
+`"branch"` or `"leaf"` per entry, parallel to [`get_next_model`](@ref). A branch opens another
+menu; a leaf is the parameter itself. Called from QML to mark the difference, which the flat
+list previously hid.
+"""
+function get_token_kinds(tokens::Vararg{AbstractString})
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    return [isempty(get_tokens(String(location), [toks; t])) ? "leaf" : "branch"
+            for t in get_next_model(String(location), toks...)]
 end
 
 """

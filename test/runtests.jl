@@ -93,6 +93,50 @@ createProject()
         end
     end
 
+    @testset "Menu entries are grouped and typed" begin
+        ct = first(ModelManagerStudio.get_cell_type_names())
+        toks  = ModelManagerStudio.get_next_model("config", ct)
+        grps  = ModelManagerStudio.get_token_groups("config", ct)
+        kinds = ModelManagerStudio.get_token_kinds("config", ct)
+
+        #! QML indexes these three in lockstep, so any length mismatch mislabels every entry
+        #! after the first divergence.
+        @test length(grps) == length(toks)
+        @test length(kinds) == length(toks)
+
+        #! Headings only work if each group forms ONE contiguous run. The authored lists did
+        #! not satisfy this: "Motility" appeared for motility/chemotaxis and again ~20 entries
+        #! later for speed/migration_bias.
+        runs = count(i -> i == 1 || grps[i] != grps[i-1], eachindex(grps))
+        @test runs == length(unique(grps))
+
+        #! Every entry is classified, and the two kinds mean what they say.
+        @test all(k -> k in ("branch", "leaf"), kinds)
+        @test !any(isempty, grps)
+        for (t, k) in zip(toks, kinds)
+            children = ModelManagerStudio.get_tokens("config", [ct, t])
+            @test (k == "branch") == !isempty(children)
+        end
+
+        #! Spot-check that the labels are the semantic ones, not a rehash of the token.
+        gof = Dict(zip(toks, grps))
+        @test gof["speed"] == "Motility"
+        @test gof["motility"] == "Motility"
+        @test gof["total"] == "Volume"
+        @test gof["cycle"] == "Cycle & death"
+        @test gof["damage_rate"] == "Integrity"
+        @test Dict(zip(toks, kinds))["cycle"] == "branch"
+        @test Dict(zip(toks, kinds))["speed"] == "leaf"
+
+        #! Render it once into the log so the menu can be eyeballed from a test run.
+        io = IOBuffer(); prev = ""
+        for (t, g, k) in zip(toks, grps, kinds)
+            g != prev && (println(io, "  == ", g, " =="); prev = g)
+            println(io, "     ", rpad(t, 34), k == "branch" ? "\u203a" : "")
+        end
+        @info "cell-type menu:\n" * String(take!(io))
+    end
+
     @testset "Unresolvable tokens are filtered, not curated away" begin
         ct = first(ModelManagerStudio.get_cell_type_names())
 
