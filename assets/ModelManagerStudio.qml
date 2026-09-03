@@ -8,7 +8,24 @@ ApplicationWindow {
 
     property var fontSizeOfLevel: [20, 18, 14, 12, 10]
 
-    title: "PhysiCellModelManager.jl GUI"
+    // The highlight applied to an input location whose folder supports parameter variation.
+    // Defined once so the legend swatch and the location tiles cannot drift apart.
+    property color variedHighlight: "#d0e8ff"
+    property string variedMarker: "\u25C8"   // ◈ — a non-color cue, since color alone fails WCAG 1.4.1
+
+    // An optional location with no folder chosen. It gets a filled tile of the SAME geometry
+    // as a varied one, so the grid reads as a set of equal cells in three states rather than
+    // some tiles having a box and others floating with no boundary at all.
+    property color unusedTint: "#e6e8ea"
+    property color unusedTextColor: "#8a8f98"
+
+    // Breathing room added to a ComboBox on top of its own padding and indicator width.
+    // The token chain measures its widest entry with a hidden Text and sizes to that, but a
+    // Text's implicitWidth is the glyph run alone -- it accounts for neither the control's
+    // padding nor the drop-down indicator, so entries clipped ("apoptosis" -> "apoptosi").
+    property int comboTextSlack: 14
+
+    title: "ModelManagerStudio"
     width: 800
     height: 600
     visible: true
@@ -125,6 +142,11 @@ ApplicationWindow {
                             property string location: "default_location"
                             property bool isVaried: false
                             property bool isRequired: false
+                            // Declarative rather than assigned in a handler, so it cannot fall
+                            // out of step with what the ComboBox is actually showing.
+                            property bool isUnused: !isRequired
+                                && (locationComboBox.currentText === project_configuration_properties.no_folder_sentinel
+                                    || locationComboBox.currentText === "")
                             property alias comboBox: locationComboBox
                             property alias label: labelTextItem // These layout properties will be applied when used in a Layout
 
@@ -140,7 +162,9 @@ ApplicationWindow {
 
                                 width: columnLayout.implicitWidth + 10
                                 height: columnLayout.implicitHeight + 10 // padding/margin
-                                color: locationItem.isVaried ? "#d0e8ff" : "transparent"
+                                color: locationItem.isVaried ? mainWindow.variedHighlight
+                                     : locationItem.isUnused ? mainWindow.unusedTint
+                                     : "transparent"
                                 radius: 4
                                 border.width: 1
                                 border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
@@ -154,9 +178,15 @@ ApplicationWindow {
                                     Text {
                                         id: labelTextItem
 
-                                        text: labelText
+                                        text: locationItem.isVaried ? (mainWindow.variedMarker + " " + labelText) : labelText
                                         font.bold: true
                                         font.pixelSize: mainWindow.fontSizeOfLevel[level]
+                                        color: locationItem.isUnused ? mainWindow.unusedTextColor : syscolors.text
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: locationItem.isVaried
+                                            ? (labelText + ", supports parameter variation")
+                                            : locationItem.isUnused ? (labelText + ", not in use")
+                                            : labelText
                                     }
 
                                     // ComboBox for selecting folder locations
@@ -184,6 +214,61 @@ ApplicationWindow {
 
                         }
 
+                    }
+
+                    // Legend: the highlight is otherwise unexplained, and it is the only
+                    // thing telling the user which locations can carry a variation.
+                    RowLayout {
+                        Layout.alignment: Qt.AlignCenter
+                        Layout.topMargin: 4
+                        spacing: 6
+
+                        // The swatch carries the glyph, so it is a miniature of an actual
+                        // varied tile rather than two separate cues sitting next to a
+                        // sentence that has to explain both.
+                        Rectangle {
+                            width: legendGlyph.implicitWidth + 8
+                            height: legendGlyph.implicitHeight + 4
+                            radius: 3
+                            color: mainWindow.variedHighlight
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.variedHighlight, 1.2)
+                            Layout.alignment: Qt.AlignVCenter
+
+                            Text {
+                                id: legendGlyph
+
+                                anchors.centerIn: parent
+                                text: mainWindow.variedMarker
+                                color: syscolors.text
+                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            }
+                        }
+
+                        Text {
+                            text: "can be varied"
+                            color: syscolors.text
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            Layout.alignment: Qt.AlignVCenter
+                            rightPadding: 10
+                        }
+
+                        Rectangle {
+                            width: legendGlyph.implicitWidth + 8
+                            height: legendGlyph.implicitHeight + 4
+                            radius: 3
+                            color: mainWindow.unusedTint
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.unusedTint, 1.2)
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        Text {
+                            text: "not in use"
+                            color: mainWindow.unusedTextColor
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            Layout.alignment: Qt.AlignVCenter
+                        }
                     }
 
                     // Required Locations
@@ -431,7 +516,7 @@ ApplicationWindow {
                                         RowLayout {
                                             Layout.leftMargin: 20
                                             spacing: 5
-                                            visible: modelData.value !== "--NONE--"
+                                            visible: modelData.value !== project_configuration_properties.no_folder_sentinel
 
                                             Text {
                                                 text: modelData.name + ":"
@@ -602,7 +687,9 @@ ApplicationWindow {
                                                 longestTextWidth = dummyTextItemLocation.implicitWidth;
                                             }
 
-                                            width: longestTextWidth + 50
+                                            width: longestTextWidth + leftPadding + rightPadding
+                                                   + (indicator ? indicator.width : 0)
+                                                   + mainWindow.comboTextSlack
                                             model: []
                                             // Use the colored delegate
                                             delegate: coloredItemDelegate
@@ -632,6 +719,21 @@ ApplicationWindow {
                                                 id: tokenComboBox
 
                                                 property int longestTextWidth: 0
+                                                // Heading and branch/leaf per entry, index-parallel to `model`.
+                                                // Fetched together with the model so the three cannot drift.
+                                                property var itemGroups: []
+                                                property var itemKinds: []
+
+                                                // The chain UP TO this ComboBox is what produced its model, so
+                                                // the same chain yields this level's headings and kinds.
+                                                function refreshMeta() {
+                                                    var toks = [variedLocationComboBox.currentText];
+                                                    for (let i = 0; i < index; ++i) {
+                                                        toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
+                                                    }
+                                                    itemGroups = Julia.get_token_groups.apply(Julia, toks);
+                                                    itemKinds = Julia.get_token_kinds.apply(Julia, toks);
+                                                }
 
                                                 function updateLongestTextWidth() {
                                                     let longest = "";
@@ -660,18 +762,83 @@ ApplicationWindow {
                                                 }
 
                                                 font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                                                width: longestTextWidth + 50
+                                                width: longestTextWidth + leftPadding + rightPadding
+                                                       + (indicator ? indicator.width : 0)
+                                                       + mainWindow.comboTextSlack
                                                 model: []
                                                 // Layout.preferredWidth: 120
                                                 Layout.fillWidth: true
-                                                // Use the colored delegate
-                                                delegate: coloredItemDelegate
+                                                delegate: ItemDelegate {
+                                                    id: tokenItem
+
+                                                    property string groupLabel: index < tokenComboBox.itemGroups.length ? tokenComboBox.itemGroups[index] : ""
+                                                    property string previousGroup: (index > 0 && index - 1 < tokenComboBox.itemGroups.length) ? tokenComboBox.itemGroups[index - 1] : ""
+                                                    // A heading is drawn on the FIRST entry of each run, which is
+                                                    // why the token list is ordered so each group is contiguous.
+                                                    property bool showsHeading: groupLabel !== "" && groupLabel !== previousGroup
+                                                    property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
+
+                                                    width: ListView.view ? ListView.view.width : implicitWidth
+
+                                                    contentItem: Column {
+                                                        spacing: 2
+
+                                                        Text {
+                                                            visible: tokenItem.showsHeading
+                                                            height: visible ? implicitHeight + 4 : 0
+                                                            text: tokenItem.groupLabel
+                                                            color: "#6b7787"
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                            font.bold: true
+                                                            font.capitalization: Font.AllUppercase
+                                                        }
+
+                                                        Row {
+                                                            spacing: 8
+                                                            width: parent.width
+
+                                                            Text {
+                                                                width: parent.width - (tokenItem.opensMenu ? 18 : 0)
+                                                                text: modelData
+                                                                color: {
+                                                                    const itemType = variationRowLayout.getItemType(modelData);
+                                                                    if (itemType === "substrate")
+                                                                        return "#2060A0";
+
+                                                                    if (itemType === "cell_type")
+                                                                        return "#206020";
+
+                                                                    if (itemType === "custom")
+                                                                        return "#A02020";
+
+                                                                    return "#000000";
+                                                                }
+                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                                elide: Text.ElideRight
+                                                                verticalAlignment: Text.AlignVCenter
+                                                            }
+
+                                                            // Marks an entry that leads to another menu rather than
+                                                            // being the parameter itself -- the flat list hid that.
+                                                            Text {
+                                                                visible: tokenItem.opensMenu
+                                                                text: "\u203a"
+                                                                color: "#6b7787"
+                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                                verticalAlignment: Text.AlignVCenter
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                                 onModelChanged: {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
+                                                        itemGroups = [];
+                                                        itemKinds = [];
                                                         return ;
                                                     }
                                                     updateLongestTextWidth();
+                                                    refreshMeta();
                                                     updateNextComboBox();
                                                 }
                                                 onCurrentTextChanged: {
@@ -764,6 +931,7 @@ ApplicationWindow {
                                         width: implicitWidth
                                         onTextChanged: {
                                             createVariationButton.text = Julia.variation_exists(currentVariationTargetText.text) ? "Edit Variation" : "Create Variation";
+                                            variationValuesInput.refreshBlocker();
                                         }
                                     }
 
@@ -817,6 +985,17 @@ ApplicationWindow {
                                     TextInput {
                                         id: variationValuesInput
 
+                                        // Why the variation cannot be created right now; "" when it can.
+                                        // Recomputed on every keystroke so the button's disabled state always
+                                        // has a stated reason, instead of a click that silently does nothing.
+                                        property string blocker: ""
+
+                                        function refreshBlocker() {
+                                            blocker = Julia.variation_blocker(currentVariationTargetText.text, text);
+                                        }
+
+                                        onTextChanged: refreshBlocker()
+
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.leftMargin: 10
@@ -833,7 +1012,7 @@ ApplicationWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         // anchors.fill: parent
                                         anchors.leftMargin: 10
-                                        text: "e.g. 0.1:0.2:0.5, [1.0, 1.2, 1.5]"
+                                        text: "e.g. 0.1:0.2:0.5, [1.0, 1.2, 1.5], Normal(1.0, 0.2)"
                                         color: "#888888"
                                         font.pixelSize: mainWindow.fontSizeOfLevel[3]
                                         verticalAlignment: Text.AlignVCenter
@@ -865,7 +1044,12 @@ ApplicationWindow {
                             Layout.preferredHeight: 40
                             text: "Create Variation"
                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                            enabled: currentVariationTargetText.text !== "" && variationValuesInput.text !== ""
+                            // Gated on the SAME predicate the Julia side uses, so the button
+                            // cannot be enabled for something create_variation will refuse.
+                            enabled: variationValuesInput.blocker === ""
+                            // The reason, on hover, for anyone wondering why it is greyed out.
+                            ToolTip.visible: hovered && !enabled && variationValuesInput.blocker !== ""
+                            ToolTip.text: variationValuesInput.blocker
                             onClicked: {
                                 var tokens = [currentVariationTargetText.text, variationValuesInput.text];
                                 for (let i = 0; i < tokenComboBoxRepeater.count; ++i) {
@@ -875,12 +1059,32 @@ ApplicationWindow {
 
                                     tokens.push(text);
                                 }
-                                Julia.create_variation.apply(Julia, tokens);
+                                // "" means it worked. Anything else is a failure the live check
+                                // could not catch, and must be shown rather than sent to stderr.
+                                var err = Julia.create_variation.apply(Julia, tokens);
+                                if (err !== "" && err !== undefined) {
+                                    variationErrorDialog.message = err;
+                                    variationErrorDialog.open();
+                                    return;
+                                }
                                 currentVariationsFlickable.currentVariations = Julia.get_current_variations();
                                 text = "Edit Variation"; // Change button text to indicate edit mode
                             }
                         }
 
+                    }
+
+                    // Why the variation cannot be created, stated inline rather than left to
+                    // stderr. This is the GUI's first error surface; without it a click on a
+                    // disabled-but-not-obviously-disabled button looked like nothing happening.
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 4
+                        text: variationValuesInput.blocker
+                        visible: text !== "" && variationValuesInput.text !== ""
+                        color: "#a32a26"
+                        font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                        wrapMode: Text.Wrap
                     }
 
                     // Display current variations
@@ -1026,6 +1230,25 @@ ApplicationWindow {
 
         }
 
+    }
+
+    Dialog {
+        id: variationErrorDialog
+
+        property string message: ""
+
+        anchors.centerIn: parent
+        modal: true
+        title: "Could not create the variation"
+        standardButtons: Dialog.Ok
+        width: Math.min(520, mainWindow.width - 80)
+
+        Text {
+            width: parent ? parent.width : 400
+            text: variationErrorDialog.message
+            wrapMode: Text.Wrap
+            font.pixelSize: mainWindow.fontSizeOfLevel[3]
+        }
     }
 
     JuliaSignals {
