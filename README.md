@@ -78,7 +78,7 @@ You need an existing project. To make one, see PhysiCellModelManager's `createPr
 ### Completed
 
 - **Input folder selection** — required and optional locations discovered generically from the project's `inputs.toml`; no location names hardcoded in the GUI.
-- **Parameter browser (PhysiCell)** — cascading token chain over `config`, `rulesets_collection`, and `ic_cell`, with substrate / cell-type / custom-data names read live from the model.
+- **Parameter browser** — a generic walk of each location's base XML. Tokens are path elements, so every varied location is browsable and every offered chain resolves. No simulator-specific vocabulary.
 - **Variations** — discrete value sets, ranges, and (via the value expression) distributions. One variation per target, editable in place.
 - **Run** — launches the campaign through `ModelManager.run`.
 - **Session transcript** — replayable `.jl` script written to `mms_records/`.
@@ -98,7 +98,6 @@ You need an existing project. To make one, see PhysiCellModelManager's `createPr
 - **Calibration** — ABC-SMC setup, a live per-generation convergence view, and resume.
 - **Analysis** — browse, filter, and tag past runs from the project database.
 - **Visualization** — via [Montage.jl](https://github.com/drbergman-lab/Montage.jl), behind an extension.
-- **Parameter grammar for every varied location** — `intracellular` and `ic_ecm` are varied by the PhysiCell template but have no browser yet.
 
 See [PRD.md](PRD.md) for the behavioral spec and [progress.md](progress.md) for design rationale.
 

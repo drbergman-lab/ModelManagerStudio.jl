@@ -36,12 +36,6 @@ global current_optional_locations
 global inputs
 global tokens_avs = Tuple[]
 
-#! What a vocabulary helper returns when its base document is unavailable — an unselected
-#! folder, a location this project does not have, or a file the simulator cannot prepare.
-#! Returning empty rather than throwing keeps a missing optional input from propagating an
-#! exception out of a QML callback.
-const EMPTY_VOCABULARY = String[]
-
 #! What an optional location's dropdown shows when no folder is chosen. Defined once and
 #! handed to QML in `create_project_configuration_properties`, because it was a magic string
 #! duplicated on both sides of the Julia/QML boundary -- exactly the kind of literal that
@@ -87,10 +81,14 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
 
     initialize_record()
 
-    @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
-    @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
-    @qmlfunction is_resolvable_target delete_variation clear_variations allowed_distribution_names
-    @qmlfunction value_spec_error variation_blocker get_token_groups get_token_kinds
+    #! Every name here must exist; `@qmlfunction` on a deleted one is an UndefVarError at
+    #! launch, from inside the macro, which is how the removed vocabulary helpers showed up.
+    @qmlfunction get_folders set_input_folders get_input_folder get_varied_locations
+    @qmlfunction get_next_model get_token_kinds get_target_path is_resolvable_target
+    @qmlfunction create_variation get_current_variations variation_exists
+    @qmlfunction delete_variation clear_variations
+    @qmlfunction value_spec_error variation_blocker allowed_distribution_names
+    @qmlfunction run_simulation location_label is_varied_location
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
@@ -173,7 +171,7 @@ end
 
 function get_folders(location::AbstractString, required::Bool)
     out = required ? String[] : String[NO_FOLDER_SENTINEL]
-    location_directory = location |> Symbol |> PhysiCellModelManager.locationPath
+    location_directory = location |> Symbol |> MM.locationPath
     folders = readdir(location_directory; join=true)
     filter!(isdir, folders)
     append!(out, basename.(folders))
@@ -207,476 +205,91 @@ function get_input_folder(location::AbstractString)
     return isempty(out) ? NO_FOLDER_SENTINEL : out
 end
 
-function get_substrate_names()
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    microenvironment_element = PhysiCellModelManager.retrieveElement(xml_doc, ["microenvironment_setup"])
-    substrate_names = String[]
-    for ce in get_elements_by_tagname(microenvironment_element, "variable")
-        push!(substrate_names, attribute(ce, "name"))
-    end
-    return substrate_names
-end
 
-function get_cell_type_names()
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    cell_types_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions"])
-    cell_type_names = String[]
-    for ce in get_elements_by_tagname(cell_types_element, "cell_definition")
-        push!(cell_type_names, attribute(ce, "name"))
-    end
-    return cell_type_names
-end
 
-function get_custom_tags()
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    return [name(ce) for ce in (PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions", "cell_definition", "custom_data"]) |> child_elements)]
-end
 
-function get_user_parameter_names()
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    user_parameters_element = PhysiCellModelManager.retrieveElement(xml_doc, ["user_parameters"])
-    return [name(ce) for ce in child_elements(user_parameters_element)]
-end
 
-function get_cycle_model_phase_tag(cell_type::AbstractString)
-    global inputs
-    xml_doc = base_document(:config)
-    #! Scalar, not a vector: "" means "unknown", and config_third_tokens drops it.
-    isnothing(xml_doc) && return ""
-    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type))
-    is_rate = find_element(cycle_model_element, "phase_durations") |> isnothing
-    return is_rate ? "rate" : "duration"
-end
 
-function get_cycle_model_phase_indexes(cell_type::AbstractString, cycle_model_phase_tag::AbstractString)
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    if cycle_model_phase_tag == "rate"
-        tag = "phase_transition_rates"
-        attr_name = "start_index"
-    else
-        tag = "phase_durations"
-        attr_name = "index"
-    end
-    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type, tag))
-    return [attribute(ce, attr_name) for ce in child_elements(cycle_model_element)]
-end
 
-function get_death_model_phase_tag(cell_type::AbstractString, death_model::Symbol)
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    death_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.deathPath(cell_type, "model:name:$(death_model)"))
-    is_rate = find_element(death_model_element, "phase_durations") |> isnothing
-    base_name = is_rate ? "transition_rate" : "duration"
-    if death_model == :apoptosis
-        return base_name
-    elseif death_model == :necrosis
-        return ["$(base_name)_$(i)" for i in 0:1]
-    end
-end
 
-function get_initial_parameter_distribution_behaviors(cell_type::AbstractString)
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions"))
-    behaviors = String[]
-    for ce in get_elements_by_tagname(initial_parameter_distribution_element, "distribution")
-        ce_child = find_element(ce, "behavior")
-        push!(behaviors, content(ce_child))
-    end
-    return behaviors
-end
 
-function get_initial_parameter_distribution_behavior_tags(cell_type::AbstractString, behavior::AbstractString)
-    global inputs
-    xml_doc = base_document(:config)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions", "distribution::behavior:$(behavior)"))
-    return [n for n in (initial_parameter_distribution_element |> child_elements .|> name) if n != "behavior"]
-end
 
-function config_single_tokens()
-    return [
-        get_cell_type_names();
-        get_substrate_names();
-        "x_min"; "x_max"; "y_min"; "y_max"; "z_min"; "z_max"; "dx"; "dy"; "dz"; "use_2D";
-        "max_time"; "dt_intracellular"; "dt_diffusion"; "dt_mechanics"; "dt_phenotype";
-        "full_data_save_interval"; "svg_data_save_interval";
-        "user_parameter"
-    ]
-end
 
-function config_second_tokens(first_token::AbstractString)
-    if isempty(first_token)
-        return String[]
-    elseif first_token == "user_parameter"
-        return get_user_parameter_names()
-    elseif first_token ∈ get_substrate_names()
-        return [
-            "diffusion_coefficient"; "decay_rate";
-            "initial_condition"; "universal_dirichlet_boundary_condition";
-            "individual_dirichlet_boundary_condition"
-        ]
-    elseif first_token ∈ get_cell_type_names()
-        return [
-            get_substrate_names();
-            "cycle"; "apoptosis"; "necrosis"; "adhesion"; "motility"; "chemotaxis"; "advanced_chemotaxis"; "phagocytosis"; "fusion"; "transformation"; "attack_rate";
-            "total"; "fluid_fraction"; "nuclear"; "fluid_change_rate"; "cytoplasmic_biomass_change_rate"; "nuclear_biomass_change_rate"; "calcified_fraction"; "calcification_rate"; "relative_rupture_volume";
-            "set_relative_equilibrium_distance"; "set_absolute_equilibrium_distance";
-            "speed"; "persistence_time"; "migration_bias";
-            "apoptotic_phagocytosis_rate"; "necrotic_phagocytosis_rate"; "other_dead_phagocytosis_rate"; "attack_damage_rate"; "attack_duration";
-            "damage_rate"; "damage_repair_rate";
-            ["custom:$(tag)" for tag in get_custom_tags()];
-            "initial_parameter_distribution"
-        ]
-    else
-        return String[]
-    end
-end
 
-function config_third_tokens(first_token::AbstractString, second_token::AbstractString)
-    if second_token == "individual_dirichlet_boundary_condition"
-        return ["xmin"; "xmax"; "ymin"; "ymax"; "zmin"; "zmax"]
-    elseif second_token ∈ ["apoptosis", "necrosis"]
-        return ["death_rate"; "unlysed_fluid_change_rate"; "lysed_fluid_change_rate"; "cytoplasmic_biomass_change_rate"; "nuclear_biomass_change_rate"; "calcification_rate"; "relative_rupture_volume";
-            get_death_model_phase_tag(first_token, Symbol(second_token))]
-    elseif second_token ∈ ["adhesion", "phagocytosis", "fusion", "transformation", "attack_rate"]
-        return get_cell_type_names()
-    elseif second_token == "motility"
-        #! Children AND shortcuts. `enabled` and `use_2D` are the real <options> children;
-        #! speed, persistence_time and migration_bias belong to <motility> itself but are the
-        #! parameters a user looks for after picking "motility", so offering them here is the
-        #! right affordance even though the XML nests them differently.
-        #!
-        #! Whether they actually appear is decided by `_resolvable_tokens`, not by this list:
-        #! against PCMM 0.3.3 `configPath(ct, "motility", "speed")` maps to
-        #! motility/options/speed, which does not exist, so the three are filtered out. When
-        #! PCMM learns to map them to motility/speed they resolve and appear on their own,
-        #! with no change here.
-        return ["speed"; "persistence_time"; "migration_bias"; "enabled"; "use_2D"]
-    elseif second_token == "chemotaxis"
-        return ["enabled"; "substrate"; "direction"]
-    elseif second_token == "advanced_chemotaxis"
-        return [get_substrate_names(); "enabled"; "normalize_each_gradient"]
-    elseif second_token ∈ get_substrate_names()
-        return ["secretion_rate"; "secretion_target"; "uptake_rate"; "net_export_rate"]
-    elseif second_token == "custom"
-        return get_custom_tags()
-    elseif second_token == "cycle"
-        tag = get_cycle_model_phase_tag(first_token)
-        return isempty(tag) ? String[] : [tag]
-    elseif second_token == "initial_parameter_distribution"
-        return get_initial_parameter_distribution_behaviors(first_token)
-    else
-        return String[]
-    end
-end
 
-function config_fourth_tokens(first_token::AbstractString, second_token::AbstractString, third_token::AbstractString)
-    if second_token == "cycle"
-        return get_cycle_model_phase_indexes(first_token, third_token)
-    elseif second_token == "initial_parameter_distribution"
-        return get_initial_parameter_distribution_behavior_tags(first_token, third_token)
-    else
-        return String[]
-    end
-end
 
+"""
+    get_next_model(tokens::Vararg{AbstractString})
+
+Child tokens for the chain `tokens` (first entry is the location). Called from QML.
+"""
 function get_next_model(tokens::Vararg{AbstractString})
-    tokens = [String.(tokens)...]
-    location = popfirst!(tokens)
-    kept = _resolvable_tokens(String(location), tokens, get_tokens(String(location), tokens))
-    return _grouped_order(String(location), tokens, kept)
-end
-
-#! Semantic grouping for the token menus.
-#!
-#! The token lists were always grouped -- one phenotype section per source line -- but the
-#! grouping died at the `Vector{String}` boundary, so the menu read as arbitrary. Worse, the
-#! list mixes entries that open another menu with entries that ARE the parameter, and nothing
-#! distinguished them.
-#!
-#! Grouping is DEPTH-DEPENDENT: the same token name means different things at different levels.
-#! `use_2D` at the top level is `domain/use_2D`, but under a cell type's `motility` it is a
-#! motility option -- so a table keyed on the token name alone labelled the domain's `use_2D`
-#! as "Motility". Hence two tables, selected by how deep the chain is.
-#!
-#! These tables are PhysiCell vocabulary and belong in the simulator extension alongside the
-#! `config_*_tokens` cascade they label. They live here for now because that cascade does.
-
-"""
-Groups for the top level of `config`, where tokens name the domain, the clocks, the save
-intervals and the user parameter block.
-"""
-const CONFIG_TOP_LEVEL_GROUPS = Dict{String,String}(
-    "x_min" => "Domain", "x_max" => "Domain", "y_min" => "Domain", "y_max" => "Domain",
-    "z_min" => "Domain", "z_max" => "Domain", "dx" => "Domain", "dy" => "Domain",
-    "dz" => "Domain", "use_2D" => "Domain",
-
-    "max_time" => "Time", "dt_intracellular" => "Time", "dt_diffusion" => "Time",
-    "dt_mechanics" => "Time", "dt_phenotype" => "Time",
-
-    "full_data_save_interval" => "Saves", "svg_data_save_interval" => "Saves",
-
-    "user_parameter" => "User parameters",
-)
-
-"""
-Groups for tokens below the top level — the phenotype sections of a cell definition, and the
-motility options where `use_2D` genuinely does mean motility.
-"""
-const CONFIG_TOKEN_GROUPS = Dict{String,String}(
-    "cycle" => "Cycle & death", "apoptosis" => "Cycle & death", "necrosis" => "Cycle & death",
-
-    "adhesion" => "Cell interactions", "phagocytosis" => "Cell interactions",
-    "fusion" => "Cell interactions", "transformation" => "Cell interactions",
-    "attack_rate" => "Cell interactions",
-    "apoptotic_phagocytosis_rate" => "Cell interactions",
-    "necrotic_phagocytosis_rate" => "Cell interactions",
-    "other_dead_phagocytosis_rate" => "Cell interactions",
-    "attack_damage_rate" => "Cell interactions", "attack_duration" => "Cell interactions",
-
-    "motility" => "Motility", "chemotaxis" => "Motility", "advanced_chemotaxis" => "Motility",
-    "speed" => "Motility", "persistence_time" => "Motility", "migration_bias" => "Motility",
-    "enabled" => "Motility", "use_2D" => "Motility",
-
-    "total" => "Volume", "fluid_fraction" => "Volume", "nuclear" => "Volume",
-    "fluid_change_rate" => "Volume", "cytoplasmic_biomass_change_rate" => "Volume",
-    "nuclear_biomass_change_rate" => "Volume", "calcified_fraction" => "Volume",
-    "calcification_rate" => "Volume", "relative_rupture_volume" => "Volume",
-
-    "set_relative_equilibrium_distance" => "Mechanics",
-    "set_absolute_equilibrium_distance" => "Mechanics",
-
-    "damage_rate" => "Integrity", "damage_repair_rate" => "Integrity",
-
-    "initial_parameter_distribution" => "Distributions",
-)
-
-"""
-    token_group(location, chain, token)
-
-The heading a token belongs under, or `""` for no heading.
-
-Substrate and cell-type names are recognized dynamically rather than tabulated, because they
-come from the user's own model.
-"""
-function token_group(location::AbstractString, chain::Vector{String}, token::AbstractString)
-    location == "config" || return ""
-    t = String(token)
-    startswith(t, "custom:") && return "Custom data"
-
-    #! Names first, since a user's cell type or substrate could in principle collide with a
-    #! tabulated tag, and the model's own vocabulary should win.
-    if t in get_substrate_names()
-        return isempty(chain) ? "Substrates" : "Secretion & uptake"
-    end
-    if t in get_cell_type_names()
-        return isempty(chain) ? "Cell types" : "Targets"
-    end
-
-    #! Depth decides which table applies. Consulting the deeper table at the top level is what
-    #! put the domain's `use_2D` under "Motility".
-    table = isempty(chain) ? CONFIG_TOP_LEVEL_GROUPS : CONFIG_TOKEN_GROUPS
-    return get(table, t, "Other")
-end
-
-#! Heading order. The source lists were grouped, but not contiguously -- "Motility" appeared
-#! once for the motility/chemotaxis branches and again twenty entries later for the speed and
-#! migration_bias shortcuts, and "Cell interactions" likewise. Headings need each group in one
-#! run, so the tokens are ordered by group before they leave for QML. Ordering is stable, so
-#! entries keep their authored order within a group.
-const CONFIG_GROUP_ORDER = ["Cell types", "Substrates",
-                            "Domain", "Time", "Saves", "User parameters",
-                            "Secretion & uptake", "Cycle & death", "Motility", "Mechanics",
-                            "Volume", "Cell interactions", "Integrity", "Targets",
-                            "Custom data", "Distributions", "Other", ""]
-
-"""
-    _grouped_order(location, chain, tokens)
-
-Reorder `tokens` so every group forms one contiguous run, preserving the authored order inside
-each group. Locations with no grouping are returned untouched.
-"""
-function _grouped_order(location::AbstractString, chain::Vector{String}, tokens::Vector{String})
-    location == "config" || return tokens
-    length(tokens) < 2 && return tokens
-    rank = Dict(g => i for (i, g) in enumerate(CONFIG_GROUP_ORDER))
-    fallback = length(CONFIG_GROUP_ORDER) + 1
-    return sort(tokens; by=t -> get(rank, token_group(location, chain, t), fallback), alg=MergeSort)
-end
-
-"""
-    get_token_groups(tokens::Vararg{AbstractString})
-
-Group headings parallel to [`get_next_model`](@ref). Called from QML, which draws a heading
-wherever this changes between adjacent entries.
-"""
-function get_token_groups(tokens::Vararg{AbstractString})
     toks = [String.(tokens)...]
     location = popfirst!(toks)
-    return [token_group(location, toks, t) for t in get_next_model(String(location), toks...)]
+    return get_tokens(String(location), toks)
+end
+
+#! Attributes used to tell same-tag siblings apart, in priority order. Mirrors the priority in
+#! ModelManager's own `recurseToGetParameterValues!` ("name", "ID", "id"), so a browser token
+#! matches the column name MM gives the same parameter, plus "type" for the IC files.
+const ID_ATTRIBUTES = ["name", "ID", "id", "type"]
+
+"""
+    get_tokens(location, previous_tokens)
+
+Child tokens of the element at `previous_tokens` in `location`'s base document; `String[]` at a
+leaf, or when the document is unavailable.
+
+A plain walk of the XML. Tokens ARE path elements, so a chain is an `XMLPath` and the target is
+`columnName` of it — there is no translation table to keep in step with the simulator's own
+path builders, and no vocabulary that can disagree with them.
+
+Termination is structural: a finite document, one token per level, nothing below a leaf.
+"""
+function get_tokens(location::AbstractString, previous_tokens::Vector{String})
+    element = _element_at(location, previous_tokens)
+    isnothing(element) && return String[]
+    return get_next_xml_path_elements(element, ID_ATTRIBUTES)
+end
+
+"""
+    _element_at(location, chain)
+
+The element `chain` names in `location`'s base document, or `nothing`. Never throws: an
+unselected folder, a location this project lacks, and a path that is not in the document all
+come back as `nothing`, because every caller is reached from a QML callback.
+"""
+function _element_at(location::AbstractString, chain::Vector{String})
+    doc = base_document(Symbol(location))
+    isnothing(doc) && return nothing
+    path = [t for t in chain if !isempty(t)]
+    #! `retrieveElement` starts at the root, so an empty chain needs no special case.
+    return try
+        MM.retrieveElement(doc, path; required=false)
+    catch
+        nothing
+    end
 end
 
 """
     get_token_kinds(tokens::Vararg{AbstractString})
 
-`"branch"` or `"leaf"` per entry, parallel to [`get_next_model`](@ref). A branch opens another
-menu; a leaf is the parameter itself. Called from QML to mark the difference, which the flat
-list previously hid.
+`"branch"` or `"leaf"` per entry, parallel to [`get_next_model`](@ref). Called from QML to mark
+which entries open another menu.
 """
 function get_token_kinds(tokens::Vararg{AbstractString})
     toks = [String.(tokens)...]
     location = popfirst!(toks)
-    return [isempty(get_tokens(String(location), [toks; t])) ? "leaf" : "branch"
-            for t in get_next_model(String(location), toks...)]
-end
-
-"""
-    _resolvable_tokens(location, chain, candidates)
-
-Drop candidates that lead nowhere, keeping those that open a further menu or name a parameter
-that exists in the base file.
-
-The token lists deliberately mix two kinds of entry: **children**, which mirror the document's
-own nesting, and **shortcuts**, which surface a parameter where a user will look for it rather
-than where the XML happens to put it. Nothing forces either kind to resolve — the vocabulary and
-the path builder are separate functions that can disagree — and an unresolvable token is worse
-than a missing one, because the GUI will build a variation from it that fails only when the
-simulation runs.
-
-Filtering here rather than curating each list by hand means Studio tracks the simulator: a
-shortcut the backend cannot yet resolve simply does not appear, and starts appearing once it can.
-
-A candidate that leads to further choices is always kept — an intermediate chain has no target
-of its own, so resolvability says nothing about it.
-"""
-function _resolvable_tokens(location::AbstractString, chain::Vector{String}, candidates)
-    isempty(candidates) && return String[]
-    loc = Symbol(location)
-    loc in MM.projectLocations().all || return collect(candidates)
-    isnothing(base_document(loc)) && return collect(candidates)
-
-    kept = String[]
-    for candidate in candidates
-        next_chain = [chain; String(candidate)]
-
-        #! Opens another menu: keep it, and let the deeper level do its own filtering.
-        if !isempty(get_tokens(location, next_chain))
-            push!(kept, String(candidate))
-            continue
-        end
-
-        target = get_target_path(location, next_chain...)
-        if !is_resolvable_target(target)
-            model_manager_studio_debug("Dropping \"$(join(next_chain, " > "))\": no path could be built.")
-            continue
-        end
-        if isnothing(base_element(loc, MM.columnNameToXMLPath(String(target))))
-            model_manager_studio_debug("Dropping \"$(join(next_chain, " > "))\": $(target) is not in the base file.")
-            continue
-        end
-        push!(kept, String(candidate))
-    end
-    return kept
-end
-
-function get_tokens(location::AbstractString, previous_tokens::Vector{String})
-    global inputs
-    if !isdefined(ModelManagerStudio, :inputs)
-        return String[]
-    end
-    n_tokens = length(previous_tokens)
-    if location == "config"
-        if n_tokens == 0
-            return config_single_tokens()
-        elseif n_tokens == 1
-            return config_second_tokens(previous_tokens[1])
-        elseif n_tokens == 2
-            return config_third_tokens(previous_tokens[1], previous_tokens[2])
-        elseif n_tokens == 3
-            return config_fourth_tokens(previous_tokens[1], previous_tokens[2], previous_tokens[3])
-        else
-            #! Config paths bottom out at the fourth token. This branch used to fall through
-            #! to `config_fourth_tokens(previous_tokens[1:3]...)`, which ignores every token
-            #! past the third and therefore returns the SAME list forever — so selecting
-            #! e.g. `cell_type > cycle > rate > 0` filled every ComboBox with identical
-            #! phase indexes, ran the repeater off its end, and left the target unresolved.
-            return String[]
-        end
-    elseif location == "rulesets_collection"
-        if n_tokens == 0
-            return get_cell_type_names()
-        elseif n_tokens == 1
-            return get_ruled_behaviors(previous_tokens[1])
-        else
-            return get_next_rule_tags(previous_tokens...)
-        end
-    elseif location == "ic_cell"
-        if n_tokens == 0
-            return get_cell_type_names()
-        elseif n_tokens == 1
-            return get_patch_types(previous_tokens[1])
-        else
-            return get_next_ic_cell_tags(previous_tokens...)
-        end
-    else
-        #! A varied location with no token grammar. The PhysiCell template also varies
-        #! `intracellular` and `ic_ecm`, which fall through here — this used to return
-        #! `nothing`, which QML renders as an empty ComboBox with no explanation. Returning
-        #! an empty vector and saying so makes the gap diagnosable instead of mysterious.
-        #! Both need a token grammar; see the parameter-browser interface work.
-        model_manager_studio_warn("No parameter browser for location \"$(location)\" yet — nothing to select.")
-        return String[]
+    chain = [t for t in toks if !isempty(t)]
+    return map(get_next_model(String(location), toks...)) do t
+        child = _element_at(String(location), [chain; t])
+        (isnothing(child) || MM.elementIsTerminal(child)) ? "leaf" : "branch"
     end
 end
 
-function get_ruled_behaviors(cell_type::AbstractString)
-    global inputs
-    xml_doc = base_document(:rulesets_collection)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"]; required=false)
-    if isnothing(rules_element)
-        model_manager_studio_info("No behavior ruleset found for cell type: $cell_type")
-        return String[]
-    end
-    return [attribute(ce, "name") for ce in get_elements_by_tagname(rules_element, "behavior")]
-end
 
-function get_next_rule_tags(tokens::Vararg{AbstractString})
-    global inputs
-    xml_doc = base_document(:rulesets_collection)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(tokens[1])"; "behavior:name:$(tokens[2])"; tokens[3:end]...])
-    return get_next_xml_path_elements(rules_element, ["name"])
-end
 
-function get_patch_types(cell_type::AbstractString)
-    global inputs
-    xml_doc = base_document(:ic_cell)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(cell_type)"])
-    return [attribute(ce, "type") for ce in get_elements_by_tagname(ic_element, "patch_collection")]
-end
 
-function get_next_ic_cell_tags(tokens::Vararg{AbstractString})
-    global inputs
-    xml_doc = base_document(:ic_cell)
-    isnothing(xml_doc) && return EMPTY_VOCABULARY
-    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(tokens[1])"; "patch_collection:type:$(tokens[2])"; String.(tokens[3:end])...])
-    return get_next_xml_path_elements(ic_element, ["type", "ID"])
-end
 
 function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String})
     child_elements_ = child_elements(e)
@@ -754,52 +367,27 @@ function is_resolvable_target(target::AbstractString)
     return !isempty(t) && !startswith(t, TARGET_ERROR_PREFIX)
 end
 
+"""
+    get_target_path(location, tokens...)
+
+The display path for the chain, or a [`target_error`](@ref) when it does not name a parameter.
+
+The chain is already the XML path, so this is just its column name. It replaces a per-location
+dispatch onto the simulator's path builders (`configPath`, `rulePath`, `icCellsPath`,
+`icECMPath`) — each of which could disagree with the token vocabulary that fed it, which is
+exactly how unresolvable targets arose.
+"""
 function get_target_path(location::AbstractString, tokens::Vararg{AbstractString})
-    if location == "config"
-        return get_config_path(tokens...)
-    elseif location == "rulesets_collection"
-        length(tokens) < 3 && return target_error("Choose a behavior and a rule field.")
-        return rulePath(tokens...) |> PhysiCellModelManager.columnName
-    elseif location == "ic_cell"
-        length(tokens) < 3 && return target_error("Choose a patch type and a patch field.")
-        tokens = [String.(tokens)...]
-        tokens[3] = split(tokens[3], ":")[end] # just get the ID part since icCellsPath just needs the ID (this gui is showing the ID to help make it make sense for the user)
-        if length(tokens) > 4
-            @assert tokens[4] == "carveout_patches" "Expected 'carveout_patches' as the fourth token for ic_cell location"
-            tokens[5] = split(tokens[5], ":")[end] # just get the carveout patch type
-            tokens[6] = split(tokens[6], ":")[end] # just get the carveout patch ID
-            popat!(tokens, 4) # remove 'carveout_patches' token since icCellsPath doesn't need it
-        end
-        return icCellsPath(String.(tokens)...) |> PhysiCellModelManager.columnName
-    elseif location == "ic_ecm"
-        length(tokens) < 3 && return target_error("Choose an ECM patch and a field.")
-        return icECMPath(tokens...) |> PhysiCellModelManager.columnName
-    else
-        return [t for t in String.(tokens) if !isempty(t)] |> PhysiCellModelManager.columnName
-    end
+    chain = [t for t in String.(tokens) if !isempty(t)]
+    isempty(chain) && return target_error("Choose a parameter.")
+
+    element = _element_at(location, chain)
+    isnothing(element) && return target_error("Not a parameter in this model.")
+    MM.elementIsTerminal(element) || return target_error("Keep going — this is not a parameter yet.")
+
+    return MM.columnName(MM.XMLPath(chain))
 end
 
-function get_config_path(tokens::Vararg{AbstractString})
-    tokens = [tokens...]
-    if length(tokens) > 1
-        if tokens[2] == "universal_dirichlet_boundary_condition"
-            tokens[2] = "Dirichlet_boundary_condition"
-        elseif tokens[2] == "individual_dirichlet_boundary_condition"
-            tokens[2] = "Dirichlet_options"
-        end
-    end
-    s = target_error("Not a complete parameter path.")
-    try
-        s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> PhysiCellModelManager.columnName
-    catch e
-        model_manager_studio_warn("Invalid configuration path:\n\t$(join(tokens, " > "))")
-        #! `sprint(showerror, e)`, not `e.msg`: only some exception types have a `.msg` field,
-        #! so a BoundsError or MethodError from configPath made this handler itself throw,
-        #! turning a logged warning into an unhandled error inside a Qt callback.
-        model_manager_studio_debug("Error details: $(sprint(showerror, e))")
-    end
-    return s
-end
 
 """
     value_spec_error(spec::AbstractString)
@@ -850,7 +438,7 @@ function create_variation(target::AbstractString, vals::AbstractString, tokens::
         return msg
     end
 
-    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
+    target = target |> String |> MM.columnNameToXMLPath
     try
         vals = parse_value_spec(vals)
     catch e
@@ -881,7 +469,7 @@ end
 
 function variation_exists(target::AbstractString)
     is_resolvable_target(target) || return false
-    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
+    target = target |> String |> MM.columnNameToXMLPath
     return find_variation_index(target) |> !isnothing
 end
 
@@ -978,7 +566,7 @@ function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
 end
 
 function create_project_configuration_properties()
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     req_locs = [pl.required...]
     opt_locs = setdiff(pl.all, req_locs)
 
@@ -1004,14 +592,14 @@ function location_label(location::AbstractString)
     return uppercasefirst(out) * " folder"
 end
 
-is_varied_location(location::AbstractString) = Symbol(location) ∈ PhysiCellModelManager.projectLocations().varied
+is_varied_location(location::AbstractString) = Symbol(location) ∈ MM.projectLocations().varied
 
 function is_varied_location(location::AbstractString, folder::AbstractString)
     folder = String(folder)
     if isempty(folder) || folder == NO_FOLDER_SENTINEL
         return false
     end
-    input_folder = PhysiCellModelManager.InputFolder(Symbol(location), folder)
+    input_folder = MM.InputFolder(Symbol(location), folder)
     return input_folder.varied
 end
 
@@ -1023,7 +611,7 @@ end
 
 function required_input_folders()
     global current_required_locations
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     current_required_locations = MMSFolder[]
     for loc in pl.required
         loc_str = String(loc)
@@ -1036,7 +624,7 @@ end
 
 function optional_input_folders()
     global current_optional_locations
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     current_optional_locations = MMSFolder[]
     for loc in setdiff(pl.all, pl.required)
         loc_str = String(loc)

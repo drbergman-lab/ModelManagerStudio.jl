@@ -47,11 +47,10 @@ createProject()
     #! throws UndefVarError. Nothing in the suite used to touch create_variation or the
     #! record transcript, so that break was invisible.
     @testset "Creating variations" begin
-        target = ModelManagerStudio.get_target_path("config", "max_time")
+        target = ModelManagerStudio.get_target_path("config", "overall", "max_time")
         @test target isa AbstractString
-        @test !isempty(target)
-        @test !occursin("INVALID", target)
-        @test !occursin("Invalid", target)
+        @test ModelManagerStudio.is_resolvable_target(target)
+        @test target == "overall/max_time"
         @test !ModelManagerStudio.variation_exists(target)
 
         ModelManagerStudio.create_variation(target, "[100.0, 200.0]")
@@ -70,28 +69,124 @@ createProject()
         @test occursin("ElementaryVariation", read(ModelManagerStudio.path_to_record, String))
     end
 
-    @testset "Token chain terminates" begin
-        ct = first(ModelManagerStudio.get_cell_type_names())
+    @testset "Browser walks the document" begin
+        #! The browser is a plain XML walk now: tokens ARE path elements. The top level of
+        #! config is therefore the config root's own children, not a curated vocabulary.
+        top = ModelManagerStudio.get_next_model("config")
+        @test !isempty(top)
+        @test "domain" in top
+        @test "overall" in top
+        #! Curated semantic tokens are gone -- `max_time` is reached as overall > max_time.
+        @test !("max_time" in top)
+        @test !("user_parameter" in top)
 
-        #! Walk the cycle branch to its documented leaf and one step past it. Before the
-        #! fix, every depth past 3 returned the same phase-index list forever.
-        phase_tag = ModelManagerStudio.get_cycle_model_phase_tag(ct)
-        idxs = ModelManagerStudio.get_tokens("config", [ct, "cycle", phase_tag])
-        @test !isempty(idxs)
+        #! Same-tag siblings are distinguished by attribute, with exactly two colons so that
+        #! retrieveElement's limit=3 split and getChildByAttribute's 3-way destructure work.
+        defs = ModelManagerStudio.get_next_model("config", "cell_definitions")
+        @test !isempty(defs)
+        @test all(t -> count(==(':'), t) in (0, 2), defs)
+        @test any(t -> startswith(t, "cell_definition:name:"), defs)
 
-        past_leaf = ModelManagerStudio.get_tokens("config", [ct, "cycle", phase_tag, first(idxs)])
-        @test isempty(past_leaf)
-        @test past_leaf != idxs
-
-        #! Any depth past the leaf must stay empty, not resume.
-        @test isempty(ModelManagerStudio.get_tokens("config", [ct, "cycle", phase_tag, first(idxs), "junk"]))
-
-        #! A location with no token grammar returns an empty vector, never `nothing`,
-        #! so QML gets a real (if empty) model.
-        for loc in ("intracellular", "ic_ecm", "not_a_location")
-            @test ModelManagerStudio.get_tokens(loc, String[]) == String[]
+        #! Every varied location is browsable now, including the two that had no grammar
+        #! under the curated cascade and returned nothing.
+        for loc in ModelManagerStudio.get_varied_locations()
+            toks = ModelManagerStudio.get_next_model(loc)
+            @test toks isa Vector{String}
         end
+
+        #! An unknown location yields an empty model rather than throwing or returning nothing.
+        @test ModelManagerStudio.get_next_model("not_a_location") == String[]
     end
+
+    @testset "Chain terminates at a leaf" begin
+        #! Structural, not curated: a finite document, one token per level, nothing below a
+        #! leaf. Walk to a known scalar and one step past it.
+        @test !isempty(ModelManagerStudio.get_next_model("config", "overall"))
+        @test ModelManagerStudio.get_next_model("config", "overall", "max_time") == String[]
+        @test ModelManagerStudio.get_next_model("config", "overall", "max_time", "junk") == String[]
+    end
+
+    @testset "Target is the path itself" begin
+        t = ModelManagerStudio.get_target_path("config", "overall", "max_time")
+        @test ModelManagerStudio.is_resolvable_target(t)
+        @test t == "overall/max_time"
+        #! Round trips through ModelManager's own column-name encoding.
+        @test MM.columnName(MM.XMLPath(MM.columnNameToXMLPath(t))) == t
+
+        #! An interior node is not a parameter, and says so rather than producing a path.
+        @test !ModelManagerStudio.is_resolvable_target(ModelManagerStudio.get_target_path("config", "overall"))
+        #! Neither is a path that is not in the document.
+        @test !ModelManagerStudio.is_resolvable_target(ModelManagerStudio.get_target_path("config", "nope"))
+        @test !ModelManagerStudio.is_resolvable_target(ModelManagerStudio.get_target_path("config"))
+    end
+
+    @testset "Every offered chain resolves" begin
+        #! Tokens are read FROM the document, so this holds by construction rather than by a
+        #! filter -- but assert it, because it is the property the curated cascade kept
+        #! breaking. Walk the whole config tree to a bounded depth.
+        doc = ModelManagerStudio.base_document(:config)
+        @test doc !== nothing
+        bad = String[]
+        leaves = Ref(0)
+        function walk(chain, depth)
+            depth > 6 && return
+            for t in ModelManagerStudio.get_next_model("config", chain...)
+                next = [chain; t]
+                kids = ModelManagerStudio.get_next_model("config", next...)
+                if isempty(kids)
+                    leaves[] += 1
+                    tgt = ModelManagerStudio.get_target_path("config", next...)
+                    ModelManagerStudio.is_resolvable_target(tgt) || push!(bad, join(next, "/"))
+                else
+                    walk(next, depth + 1)
+                end
+            end
+        end
+        walk(String[], 1)
+        for b in bad
+            @info "unresolvable: $b"
+        end
+        @test isempty(bad)
+        @test leaves[] > 50     # the walk actually covered the document
+    end
+
+    @testset "Menus render" begin
+        #! Rendered into the log so the walked menus can be eyeballed from a test run.
+        function render(chain)
+            toks  = ModelManagerStudio.get_next_model("config", chain...)
+            kinds = ModelManagerStudio.get_token_kinds("config", chain...)
+            io = IOBuffer()
+            for (t, k) in zip(toks, kinds)
+                println(io, "     ", rpad(t, 42), k == "branch" ? "\u203a" : "")
+            end
+            @info "config" * (isempty(chain) ? "" : " > " * join(chain, " > ")) * "\n" * String(take!(io))
+        end
+        render(String[])
+        render(["cell_definitions"])
+        render(["cell_definitions", "cell_definition:name:default", "phenotype", "motility"])
+
+        #! The deep path the walk produces for a parameter the curated cascade reached in two
+        #! steps. Longer, but it is the document's own structure.
+        deep = ModelManagerStudio.get_target_path("config", "cell_definitions",
+            "cell_definition:name:default", "phenotype", "motility", "speed")
+        @test ModelManagerStudio.is_resolvable_target(deep)
+        @test deep == "cell_definitions/cell_definition:name:default/phenotype/motility/speed"
+    end
+
+    @testset "Branch and leaf kinds" begin
+        top   = ModelManagerStudio.get_next_model("config")
+        kinds = ModelManagerStudio.get_token_kinds("config")
+        @test length(kinds) == length(top)
+        @test all(k -> k in ("branch", "leaf"), kinds)
+        k = Dict(zip(top, kinds))
+        @test k["domain"] == "branch"
+        @test k["overall"] == "branch"
+
+        inner = ModelManagerStudio.get_next_model("config", "overall")
+        ik = Dict(zip(inner, ModelManagerStudio.get_token_kinds("config", "overall")))
+        @test ik["max_time"] == "leaf"
+    end
+
 
     @testset "No-folder sentinel is shared with QML" begin
         #! The sentinel used to be a literal on both sides of the Julia/QML boundary. QML now
@@ -104,125 +199,6 @@ createProject()
         @test ModelManagerStudio.NO_FOLDER_SENTINEL in
               ModelManagerStudio.get_folders(String(first(MM.projectLocations().required)), false)
         @test !ModelManagerStudio.is_varied_location("config", ModelManagerStudio.NO_FOLDER_SENTINEL)
-    end
-
-    @testset "Menu entries are grouped and typed" begin
-        ct = first(ModelManagerStudio.get_cell_type_names())
-        toks  = ModelManagerStudio.get_next_model("config", ct)
-        grps  = ModelManagerStudio.get_token_groups("config", ct)
-        kinds = ModelManagerStudio.get_token_kinds("config", ct)
-
-        #! QML indexes these three in lockstep, so any length mismatch mislabels every entry
-        #! after the first divergence.
-        @test length(grps) == length(toks)
-        @test length(kinds) == length(toks)
-
-        #! Headings only work if each group forms ONE contiguous run. The authored lists did
-        #! not satisfy this: "Motility" appeared for motility/chemotaxis and again ~20 entries
-        #! later for speed/migration_bias.
-        runs = count(i -> i == 1 || grps[i] != grps[i-1], eachindex(grps))
-        @test runs == length(unique(grps))
-
-        #! Every entry is classified, and the two kinds mean what they say.
-        @test all(k -> k in ("branch", "leaf"), kinds)
-        @test !any(isempty, grps)
-        for (t, k) in zip(toks, kinds)
-            children = ModelManagerStudio.get_tokens("config", [ct, t])
-            @test (k == "branch") == !isempty(children)
-        end
-
-        #! Grouping is depth-dependent. `use_2D` at the top level is domain/use_2D; under a
-        #! cell type's motility it is a motility option. A table keyed on the token name alone
-        #! labelled the domain's use_2D as "Motility".
-        top       = ModelManagerStudio.get_next_model("config")
-        top_grps  = ModelManagerStudio.get_token_groups("config")
-        top_of    = Dict(zip(top, top_grps))
-        @test top_of["use_2D"] == "Domain"
-        @test top_of["x_min"] == "Domain"
-        @test top_of["dz"] == "Domain"
-        @test top_of["max_time"] == "Time"
-        @test top_of["dt_diffusion"] == "Time"
-        @test top_of["full_data_save_interval"] == "Saves"
-        @test top_of["user_parameter"] == "User parameters"
-        @test top_of[ct] == "Cell types"
-
-        #! The same token, one level deeper, is motility.
-        mot_toks = ModelManagerStudio.get_next_model("config", ct, "motility")
-        mot_grps = ModelManagerStudio.get_token_groups("config", ct, "motility")
-        @test Dict(zip(mot_toks, mot_grps))["use_2D"] == "Motility"
-
-        #! Nothing should be landing in the catch-all at the top level any more: an "Other"
-        #! bucket holding the whole domain and every clock is what made the menu unreadable.
-        @test !("Other" in top_grps)
-
-        #! Top level must also be contiguous by group.
-        top_runs = count(i -> i == 1 || top_grps[i] != top_grps[i-1], eachindex(top_grps))
-        @test top_runs == length(unique(top_grps))
-
-        #! Spot-check that the labels are the semantic ones, not a rehash of the token.
-        gof = Dict(zip(toks, grps))
-        @test gof["speed"] == "Motility"
-        @test gof["motility"] == "Motility"
-        @test gof["total"] == "Volume"
-        @test gof["cycle"] == "Cycle & death"
-        @test gof["damage_rate"] == "Integrity"
-        @test Dict(zip(toks, kinds))["cycle"] == "branch"
-        @test Dict(zip(toks, kinds))["speed"] == "leaf"
-
-        #! Render it once into the log so the menu can be eyeballed from a test run.
-        io = IOBuffer(); prev = ""
-        for (t, g, k) in zip(toks, grps, kinds)
-            g != prev && (println(io, "  == ", g, " =="); prev = g)
-            println(io, "     ", rpad(t, 34), k == "branch" ? "\u203a" : "")
-        end
-        @info "cell-type menu:\n" * String(take!(io))
-
-        io2 = IOBuffer(); prev2 = ""
-        top_kinds = ModelManagerStudio.get_token_kinds("config")
-        for (t, g, k) in zip(top, top_grps, top_kinds)
-            g != prev2 && (println(io2, "  == ", g, " =="); prev2 = g)
-            println(io2, "     ", rpad(t, 28), k == "branch" ? "\u203a" : "")
-        end
-        @info "top-level menu:\n" * String(take!(io2))
-    end
-
-    @testset "Unresolvable tokens are filtered, not curated away" begin
-        ct = first(ModelManagerStudio.get_cell_type_names())
-
-        #! The vocabulary offers children AND shortcuts; the filter decides what survives.
-        raw = ModelManagerStudio.get_tokens("config", [ct, "motility"])
-        @test "speed" in raw
-        @test "enabled" in raw
-
-        #! Against PCMM 0.3.3, configPath maps the three-token motility form under
-        #! motility/options/, where speed/persistence_time/migration_bias do not exist -- so
-        #! they are dropped. When PCMM maps them to motility/<tag> they resolve and reappear
-        #! with no change here, which is the point of filtering rather than hand-curating.
-        filtered = ModelManagerStudio.get_next_model("config", ct, "motility")
-        @test "enabled" in filtered
-        @test "use_2D" in filtered
-        @test issubset(Set(filtered), Set(raw))
-
-        #! Not over-filtering: the shortcuts remain valid one level up, where PCMM maps them
-        #! to motility/<tag>, and branch tokens that open further menus are always kept.
-        second = ModelManagerStudio.get_next_model("config", ct)
-        @test "speed" in second
-        @test "persistence_time" in second
-        @test "migration_bias" in second
-        @test "cycle" in second          # a branch, kept regardless of its own resolvability
-        @test length(second) > 20        # the filter has not gutted the menu
-
-        #! Whatever survives must resolve -- that is the invariant the filter exists to hold.
-        doc = parse_file(MM.prepareBaseFile(ModelManagerStudio.inputs[:config]))
-        try
-            for tok in ModelManagerStudio.get_next_model("config", ct, "motility")
-                t = ModelManagerStudio.get_target_path("config", ct, "motility", tok)
-                @test ModelManagerStudio.is_resolvable_target(t)
-                @test MM.retrieveElement(doc, MM.columnNameToXMLPath(String(t)); required=false) !== nothing
-            end
-        finally
-            free(doc)
-        end
     end
 
     @testset "Base documents are cached and invalidated" begin
@@ -245,87 +221,6 @@ createProject()
         d3 = ModelManagerStudio.base_document(:config)
         @test d3 !== nothing
         @test ModelManagerStudio.base_element(:config, ["overall"]) !== nothing
-    end
-
-    @testset "Offered tokens resolve to real XML" begin
-        #! Every chain the browser offers THE USER must resolve to an element that exists.
-        #! Walk `get_next_model`, not `get_tokens`: the raw vocabulary deliberately
-        #! over-offers (children plus shortcuts) and `_resolvable_tokens` is what makes the
-        #! guarantee. Asserting on the raw list would forbid the over-offering that lets a
-        #! shortcut start working the moment the backend can resolve it.
-        doc = parse_file(MM.prepareBaseFile(ModelManagerStudio.inputs[:config]))
-        try
-            bad = String[]
-            function check(chain)
-                t = ModelManagerStudio.get_target_path("config", chain...)
-                ModelManagerStudio.is_resolvable_target(t) || return
-                if MM.retrieveElement(doc, MM.columnNameToXMLPath(String(t)); required=false) === nothing
-                    push!(bad, join(chain, " > ") * "  ->  " * String(t))
-                end
-            end
-
-            ct = first(ModelManagerStudio.get_cell_type_names())
-            #! Spot-check the branches with a known shape rather than the whole tree, which
-            #! re-parses the XML on every call and is far too slow for the suite until the
-            #! parameter browser caches documents per location.
-            for t2 in ("motility", "cycle", "apoptosis", "necrosis")
-                for t3 in ModelManagerStudio.get_next_model("config", ct, t2)
-                    t4s = ModelManagerStudio.get_next_model("config", ct, t2, t3)
-                    isempty(t4s) ? check([ct, t2, t3]) : foreach(t4 -> check([ct, t2, t3, t4]), t4s)
-                end
-            end
-            for t2 in ("speed", "persistence_time", "migration_bias", "total", "damage_rate")
-                check([ct, t2])
-            end
-
-            for b in bad
-                @info "unresolvable chain: $b"
-            end
-            @test isempty(bad)
-        finally
-            free(doc)
-        end
-    end
-
-    @testset "Walker emits resolvable tokens" begin
-        #! Unit-tested on a hand-built document rather than through the project, so the
-        #! result cannot depend on which optional input folders happen to be selected.
-        xml_doc = XMLDocument()
-        r = create_root(xml_doc, "root")
-        try
-            #! Two siblings sharing a tag, separable by "name".
-            for nm in ("alpha", "beta")
-                c = new_child(r, "behavior")
-                set_attribute(c, "name", nm)
-            end
-            #! One child carrying an id attribute, and one carrying none.
-            lone = new_child(r, "patch")
-            set_attribute(lone, "ID", "7")
-            new_child(r, "plain")
-
-            tokens = ModelManagerStudio.get_next_xml_path_elements(r, ["name", "ID"])
-
-            #! Every colon-bearing token must have exactly two colons. ModelManager's
-            #! `retrieveElement` splits on ":" with limit=3 and `getChildByAttribute`
-            #! destructures exactly three values, so "tag:value" raises a BoundsError.
-            for t in tokens
-                @test count(==(':'), t) in (0, 2)
-            end
-
-            @test "behavior:name:alpha" in tokens
-            @test "behavior:name:beta" in tokens
-            @test "patch:ID:7" in tokens
-            @test "plain" in tokens
-
-            #! Document order, not Dict iteration order.
-            @test tokens == ["behavior:name:alpha", "behavior:name:beta", "patch:ID:7", "plain"]
-            @test tokens == ModelManagerStudio.get_next_xml_path_elements(r, ["name", "ID"])
-
-            #! A terminal element yields nothing, which is what stops the token chain.
-            @test isempty(ModelManagerStudio.get_next_xml_path_elements(lone, ["name", "ID"]))
-        finally
-            free(xml_doc)
-        end
     end
 
     @testset "Zero-arg launch adopts an existing project" begin
@@ -526,7 +421,7 @@ createProject()
             @test V(junk) isa String
         end
 
-        good = ModelManagerStudio.get_target_path("config", "max_time")
+        good = ModelManagerStudio.get_target_path("config", "overall", "max_time")
         @test B(good, "[1.0]") == ""
         #! Each blocked case names its own reason.
         @test occursin("parameter", B("", "[1.0]"))
@@ -549,8 +444,8 @@ createProject()
         ModelManagerStudio.clear_variations()
         @test isempty(ModelManagerStudio.get_current_variations())
 
-        t1 = ModelManagerStudio.get_target_path("config", "max_time")
-        t2 = ModelManagerStudio.get_target_path("config", "dt_diffusion")
+        t1 = ModelManagerStudio.get_target_path("config", "overall", "max_time")
+        t2 = ModelManagerStudio.get_target_path("config", "overall", "dt_diffusion")
         @test ModelManagerStudio.is_resolvable_target(t1)
         @test ModelManagerStudio.is_resolvable_target(t2)
 

@@ -593,67 +593,26 @@ ApplicationWindow {
                             RowLayout {
                                 id: variationRowLayout
 
-                                // Simple helper function to determine item type
-                                function getItemType(item) {
-                                    if (!item)
-                                        return "default";
-
-                                    try {
-                                        const substrates = Julia.get_substrate_names();
-                                        if (substrates.includes(item))
-                                            return "substrate";
-
-                                        const cellTypes = Julia.get_cell_type_names();
-                                        if (cellTypes.includes(item))
-                                            return "cell_type";
-
-                                        if (item.toString().startsWith("custom:"))
-                                            return "custom";
-
-                                    } catch (e) {
-                                        console.log("Error determining item type:", e);
-                                    }
-                                    return "default";
-                                }
-
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: comboRow.implicitHeight + 20 // Add some padding
                                 Layout.alignment: Qt.AlignTop
 
-                                // Simple delegate for ComboBox items with basic styling
+                                // Plain delegate for the location ComboBox. The token
+                                // ComboBoxes have their own, which adds the branch marker.
                                 Component {
                                     id: coloredItemDelegate
 
                                     ItemDelegate {
-                                        property int level: 2 // Level of the item, used for font size
+                                        property int level: 2
 
                                         contentItem: Text {
                                             text: modelData
-                                            color: {
-                                                const itemType = variationRowLayout.getItemType(modelData);
-                                                if (itemType === "substrate")
-                                                    return "#2060A0";
-
-                                                // Blue for substrates
-                                                if (itemType === "cell_type")
-                                                    return "#206020";
-
-                                                // Green for cell types
-                                                if (itemType === "custom")
-                                                    return "#A02020";
-
-                                                // Red for custom tags
-                                                return "#000000";
-                                            }
+                                            color: "#000000"
                                             font.pixelSize: mainWindow.fontSizeOfLevel[level]
-                                            font.bold: variationRowLayout.getItemType(modelData) !== "default"
-                                            font.italic: variationRowLayout.getItemType(modelData) === "custom"
                                             elide: Text.ElideRight
                                             verticalAlignment: Text.AlignVCenter
                                         }
-
                                     }
-
                                 }
 
                                 Flickable {
@@ -719,9 +678,7 @@ ApplicationWindow {
                                                 id: tokenComboBox
 
                                                 property int longestTextWidth: 0
-                                                // Heading and branch/leaf per entry, index-parallel to `model`.
-                                                // Fetched together with the model so the three cannot drift.
-                                                property var itemGroups: []
+                                                // Branch/leaf per entry, index-parallel to `model`.
                                                 property var itemKinds: []
 
                                                 // The chain UP TO this ComboBox is what produced its model, so
@@ -731,7 +688,6 @@ ApplicationWindow {
                                                     for (let i = 0; i < index; ++i) {
                                                         toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
                                                     }
-                                                    itemGroups = Julia.get_token_groups.apply(Julia, toks);
                                                     itemKinds = Julia.get_token_kinds.apply(Julia, toks);
                                                 }
 
@@ -771,69 +727,36 @@ ApplicationWindow {
                                                 delegate: ItemDelegate {
                                                     id: tokenItem
 
-                                                    property string groupLabel: index < tokenComboBox.itemGroups.length ? tokenComboBox.itemGroups[index] : ""
-                                                    property string previousGroup: (index > 0 && index - 1 < tokenComboBox.itemGroups.length) ? tokenComboBox.itemGroups[index - 1] : ""
-                                                    // A heading is drawn on the FIRST entry of each run, which is
-                                                    // why the token list is ordered so each group is contiguous.
-                                                    property bool showsHeading: groupLabel !== "" && groupLabel !== previousGroup
                                                     property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
 
                                                     width: ListView.view ? ListView.view.width : implicitWidth
 
-                                                    contentItem: Column {
-                                                        spacing: 2
+                                                    contentItem: Row {
+                                                        spacing: 8
 
                                                         Text {
-                                                            visible: tokenItem.showsHeading
-                                                            height: visible ? implicitHeight + 4 : 0
-                                                            text: tokenItem.groupLabel
-                                                            color: "#6b7787"
-                                                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
-                                                            font.bold: true
-                                                            font.capitalization: Font.AllUppercase
+                                                            width: parent.width - (tokenItem.opensMenu ? 18 : 0)
+                                                            text: modelData
+                                                            color: "#000000"
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                            elide: Text.ElideRight
+                                                            verticalAlignment: Text.AlignVCenter
                                                         }
 
-                                                        Row {
-                                                            spacing: 8
-                                                            width: parent.width
-
-                                                            Text {
-                                                                width: parent.width - (tokenItem.opensMenu ? 18 : 0)
-                                                                text: modelData
-                                                                color: {
-                                                                    const itemType = variationRowLayout.getItemType(modelData);
-                                                                    if (itemType === "substrate")
-                                                                        return "#2060A0";
-
-                                                                    if (itemType === "cell_type")
-                                                                        return "#206020";
-
-                                                                    if (itemType === "custom")
-                                                                        return "#A02020";
-
-                                                                    return "#000000";
-                                                                }
-                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                                                                elide: Text.ElideRight
-                                                                verticalAlignment: Text.AlignVCenter
-                                                            }
-
-                                                            // Marks an entry that leads to another menu rather than
-                                                            // being the parameter itself -- the flat list hid that.
-                                                            Text {
-                                                                visible: tokenItem.opensMenu
-                                                                text: "\u203a"
-                                                                color: "#6b7787"
-                                                                font.pixelSize: mainWindow.fontSizeOfLevel[2]
-                                                                verticalAlignment: Text.AlignVCenter
-                                                            }
+                                                        // Marks an entry that leads to another menu
+                                                        // rather than being the parameter itself.
+                                                        Text {
+                                                            visible: tokenItem.opensMenu
+                                                            text: "\u203a"
+                                                            color: "#6b7787"
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                            verticalAlignment: Text.AlignVCenter
                                                         }
                                                     }
                                                 }
                                                 onModelChanged: {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
-                                                        itemGroups = [];
                                                         itemKinds = [];
                                                         return ;
                                                     }

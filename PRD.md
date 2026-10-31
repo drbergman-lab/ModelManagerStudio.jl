@@ -58,60 +58,47 @@ Three commitments shape every feature:
 
 ---
 
-## Feature: Parameter browser — **implemented for PhysiCell; interface pending**
+## Feature: Parameter browser — **implemented as a generic XML walk**
 
-**Behavior.** After choosing a varied location, the user narrows through a chain of dropdowns until the path resolves to a single parameter, whose target path is displayed.
+**Behavior.** After choosing a varied location, the user narrows through a chain of dropdowns
+over the location's base document until the chain reaches a leaf, whose path is the target.
 
-**Children and shortcuts.** A level offers two kinds of entry: **children**, mirroring the
-document's own nesting, and **shortcuts**, surfacing a parameter where a user looks for it rather
-than where the XML puts it. After choosing `motility`, `speed` belongs in the menu even though the
-XML nests it outside `<options>`.
+**Tokens are XML path elements.** The chain *is* an `XMLPath`, and the target is `columnName` of
+it. There is no vocabulary table, no translation onto the simulator's path builders, and nothing
+that can disagree with them.
 
-Studio does not hand-curate which shortcuts are valid. It offers both kinds and **filters by
-whether the chain resolves** against the base file. A shortcut the backend cannot yet resolve
-simply does not appear, and starts appearing once it can — so Studio tracks the simulator instead
-of needing a patch each time the backend's path mapping changes. Branch tokens are always kept:
-an intermediate chain has no target, so resolvability says nothing about it.
+This replaced a four-level curated cascade plus thirteen XML-introspection helpers plus two
+grouping tables (~590 lines). That machinery existed to present parameters where a user expects
+them rather than where the XML puts them, and every piece of it was a standing source of defects:
+tokens that resolved to nothing, a chain that never terminated, group labels that were wrong at
+one depth and right at another. The document already has the structure; reading it is cheaper to
+maintain and cannot disagree with itself.
 
 **Acceptance criteria.**
-- The chain **terminates**: once the path bottoms out, the next call returns `String[]`.
-- Every token offered *to the user* resolves to an element that exists. The raw vocabulary may
-  over-offer; the filter is what makes the guarantee.
-- Base documents are cached per location and freed when the input folders change. Resolvability
-  filtering is per-token, so uncached parsing would make it unaffordable.
-- A colon-bearing token has **exactly two** colons (`tag:attr:value`).
-- Token ordering is stable across calls — document order, not hash order.
-- The resolved target round-trips: `columnName(XMLPath(columnNameToXMLPath(target))) == target`.
-- Every varied location is browsable, or says explicitly that it is not.
-- The location is derived during the walk and **never asked of the user** — MM does not infer it, so Studio must tag it.
+- Tokens come from the document, so every offered chain resolves. Asserted by walking the whole
+  config tree and checking a target resolves at every leaf.
+- The chain terminates structurally: a finite document, one token per level, nothing below a leaf.
+- A colon-bearing token has **exactly two** colons (`tag:attr:value`), matching
+  `retrieveElement`'s `limit=3` split and `getChildByAttribute`'s three-way destructure.
+- Sibling disambiguation uses `ID_ATTRIBUTES` = `["name", "ID", "id", "type"]`, mirroring MM's
+  own priority so a browser token matches the column name MM gives the same parameter.
+- Token order is document order.
+- An interior node is not a target: `get_target_path` reports that rather than returning a path.
+- Every varied location is browsable, including `intracellular` and `ic_ecm`, which had no
+  grammar under the cascade and returned `nothing`.
+- Base documents are cached per location and freed when the input folders change.
+
+**Cost accepted.** Paths are longer: `speed` is now
+`cell_definitions/cell_definition:name:default/phenotype/motility/speed` rather than
+`default > speed`. Search or filtering within a level is the mitigation if that becomes
+annoying — not a return to curation.
 
 **Edge cases.**
-- **Non-terminating chain (fixed).** Config paths bottom out at four tokens. Routing every depth past three to `config_fourth_tokens(t[1:3]...)` ignores later tokens and returns the same list forever, filling all 100 ComboBoxes and never resolving a target. Reachable via `cell_type > cycle > rate > <index>`.
-- **Two-part tokens (fixed).** `retrieveElement` splits on `:` with `limit=3` and `getChildByAttribute` destructures three values, so `tag:value` raises `BoundsError` downstream.
-- **Locations with no grammar.** The PhysiCell template varies `intracellular` and `ic_ecm`; neither has a token grammar. These must return `String[]` **and warn** — never `nothing`, which QML renders as a silently empty dropdown.
-- **Ambiguous siblings.** When no attribute uniquely identifies siblings, the walker emits `"<tag> (ambiguous)"`. This string must never be usable as a path token.
-- **Unselected location.** Walker entry points must not be called for a location whose folder is `""`; `prepareBaseFile` throws from deep inside PhysiCellXMLRules.
-
-**Interface (target state).** The browser is defined by a small interface with a generic XML default in the core and curated implementations per backend. The interface belongs in **ModelManager**, with PCMM and BCMM implementing it — parameter metadata is a property of the simulator, not of the GUI:
-
-```julia
-struct ParamNode
-    token::String     # "cell_definition:name:tumor"
-    label::String     # "Tumor"
-    is_leaf::Bool
-    location::Symbol  # tagged during the walk
-end
-
-browsableLocations(sim)                        -> Vector{Symbol}
-paramChildren(sim, loc, path::Vector{String})  -> Vector{ParamNode}
-paramTarget(sim, loc, path)                    -> XMLPath
-paramValue(sim, loc, path)                     -> Any
-locationLabel(sim, loc)                        -> String
-```
-
-The generic default walks the location's base file and needs nothing from the backend. Curation — friendly labels, semantic grouping, the substrate/cell-type/custom-data distinction — is what a backend adds.
-
----
+- **Ambiguous siblings.** When no attribute uniquely identifies siblings, the walker emits
+  `"<tag> (ambiguous)"`, which can never resolve. It must not be selectable.
+- **Unselected or unknown location.** Yields `String[]`, never `nothing` and never a throw —
+  `prepareBaseFile` asserts from inside the simulator's dependencies for an unselected folder.
+- **Attribute values containing `/`** would break the `columnName` round trip, which joins on `/`.
 
 ## Feature: Variation values — **implemented; parser required**
 

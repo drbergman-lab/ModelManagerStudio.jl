@@ -85,7 +85,7 @@ function base_document(location::Symbol)
     end
 
     doc = try
-        parse_file(PhysiCellModelManager.prepareBaseFile(input_folder))
+        parse_file(MM.prepareBaseFile(input_folder))
     catch e
         model_manager_studio_debug("Could not read the base file for $(location): $(sprint(showerror, e))")
         return nothing

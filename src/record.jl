@@ -26,7 +26,7 @@ function initialize_record()
     # Date created: $(current_time)
 
     using PhysiCellModelManager, Distributions
-    initializeModelManager(\"$(PhysiCellModelManager.physicellDir())\", \"$(PhysiCellModelManager.dataDir())\")\n
+    initializeModelManager(\"$(PhysiCellModelManager.physicellDir())\", \"$(MM.dataDir())\")\n
     """
     open(path_to_record, "w") do file
         write(file, msg)
@@ -36,7 +36,7 @@ end
 
 function record_inputs()
     global path_to_record, last_record, inputs
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     required_args = join(["\"$(inputs[location].folder)\"" for location in pl.required], ", ")
     included_optional_locs = filter(location -> !isempty(inputs[location].folder), setdiff(pl.all, pl.required))
 
