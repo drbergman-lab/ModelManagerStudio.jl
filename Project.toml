@@ -10,8 +10,13 @@ Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 LightXML = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
 ModelManager = "2cc58058-5792-4be5-9801-0e92bd3a2373"
-PhysiCellModelManager = "7582d1aa-5e58-4d65-a123-4418a61a2644"
 QML = "2db162a6-7e43-52c3-8d84-290c1c42d82a"
+
+[weakdeps]
+PhysiCellModelManager = "7582d1aa-5e58-4d65-a123-4418a61a2644"
+
+[extensions]
+StudioPhysiCellModelManagerExt = "PhysiCellModelManager"
 
 [compat]
 Compat = "4.16.0"
@@ -25,7 +30,8 @@ QML = "0.11"
 julia = "1.10"
 
 [extras]
+PhysiCellModelManager = "7582d1aa-5e58-4d65-a123-4418a61a2644"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["PhysiCellModelManager", "Test"]

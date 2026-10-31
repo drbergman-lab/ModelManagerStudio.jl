@@ -16,7 +16,7 @@ createProject()
         end
 
         for args in [["."], [joinpath(".", "PhysiCell"), joinpath(".", "data")]]
-            physicell_dir, data_dir = ModelManagerStudio.get_pcmm_paths(args...)
+            physicell_dir, data_dir = Base.get_extension(ModelManagerStudio, :StudioPhysiCellModelManagerExt).physicell_project_paths(args...)
             @test isdir(data_dir)
             @test isdir(physicell_dir)
             @test abspath(physicell_dir) == abspath(joinpath(".", "PhysiCell"))
@@ -228,7 +228,7 @@ createProject()
         #! adopt it rather than re-deriving paths from pwd() -- otherwise launching from any
         #! directory other than the project root silently retargets or fails, even though the
         #! session already has a perfectly good project open.
-        @test ModelManagerStudio._model_manager_is_initialized()
+        @test ModelManagerStudio.studio_project_is_open()
         data_before = MM.dataDir()
 
         elsewhere = mktempdir()
@@ -237,9 +237,40 @@ createProject()
             @test MM.dataDir() == data_before
         end
 
-        #! Explicit arguments still win over the adopted project.
-        @test ModelManagerStudio.get_pcmm_paths(".") ==
+        #! Explicit arguments still win over the adopted project; the PhysiCell layout now
+        #! lives in the extension.
+        ext = Base.get_extension(ModelManagerStudio, :StudioPhysiCellModelManagerExt)
+        @test ext.physicell_project_paths(".") ==
               (abspath(normpath(joinpath(".", "PhysiCell"))), abspath(normpath(joinpath(".", "data"))))
+    end
+
+    @testset "PhysiCell support arrives as an extension" begin
+        ext = Base.get_extension(ModelManagerStudio, :StudioPhysiCellModelManagerExt)
+        @test ext !== nothing
+
+        sim = ModelManagerStudio.studio_backend()
+        @test sim isa PhysiCellModelManager.PhysiCellSimulator
+
+        #! Each seam function must reach the PhysiCell method, not the generic fallback.
+        @test occursin("PhysiCell", ModelManagerStudio.studio_no_project_message(sim))
+        @test occursin("createProject", ModelManagerStudio.studio_no_project_message(sim))
+
+        #! The transcript must reopen a PhysiCell project, which takes both directories --
+        #! the generic one-argument form would produce a script that does not run.
+        pre = ModelManagerStudio.studio_transcript_preamble(sim)
+        @test occursin("using PhysiCellModelManager", pre)
+        @test occursin(PhysiCellModelManager.physicellDir(), pre)
+        @test occursin(MM.dataDir(), pre)
+
+        #! The PhysiCell project layout lives in the extension now, not in core.
+        @test !isdefined(ModelManagerStudio, :get_pcmm_paths)
+        pc, dat = ext.physicell_project_paths("someproj")
+        @test endswith(pc, joinpath("someproj", "PhysiCell"))
+        @test endswith(dat, joinpath("someproj", "data"))
+        @test ext.physicell_project_paths() |> first |> isabspath
+
+        #! Core carries no PhysiCell dependency.
+        @test !(:PhysiCellModelManager in names(ModelManagerStudio; all=true, imported=true))
     end
 
     @testset "Documented API is reachable" begin

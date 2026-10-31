@@ -15,22 +15,13 @@ function _studio_main(args)
         launch(args...)
         return 0
     catch e
-        #! Deliberately not matching on a simulator-specific exception type here. The failure
-        #! modes are a backend's own missing-project error and Studio's own initialization
-        #! failure, and naming `PhysiCellModelManager.PCMMMissingProject` both hardcoded a
-        #! PhysiCell reference and hid every other cause. Report whatever happened.
+        #! Deliberately not matching on a backend-specific exception type: that both hardcoded
+        #! a simulator reference and hid every other cause. Report whatever happened.
         println(stderr, "ModelManagerStudio could not start.\n")
         println(stderr, sprint(showerror, e))
-        println(stderr, """
-
-        Studio needs an existing project. Either run it from a project directory, or pass one:
-
-            using ModelManagerStudio
-            launch("path/to/project")
-
-        To create a project first, see your simulator package's project-creation function
-        (for PhysiCell: `PhysiCellModelManager.createProject()`).
-        """)
+        #! The backend names its own project-creation function; Studio cannot.
+        sim = studio_backend()
+        println(stderr, isnothing(sim) ? studio_no_backend_message() : studio_no_project_message(sim))
         return 1
     end
 end

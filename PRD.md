@@ -58,6 +58,34 @@ Three commitments shape every feature:
 
 ---
 
+## Feature: Simulator backend seam — **implemented**
+
+**Behavior.** Studio depends on ModelManager alone. A backend reaches it through a package
+extension that adds methods to three functions, dispatched on `ModelManager.AbstractSimulator`:
+
+```julia
+studio_open_project(sim, args...)      -> Bool     # where projects live on disk
+studio_transcript_preamble(sim)        -> String   # how the recorded script reopens one
+studio_no_project_message(sim)         -> String   # how to point a lost user at createProject
+```
+
+**Acceptance criteria.**
+- Each has a working generic default, so a backend implementing none still drives the GUI.
+- Studio loads and precompiles with **no** simulator package present.
+- With no backend registered, `launch` explains that rather than raising an `AssertionError`
+  from `mm_globals()`.
+- The parameter browser is deliberately *not* in this seam: it reads the base document, which
+  is the same operation for any backend whose inputs are XML.
+
+**Edge cases.**
+- **`studio_transcript_preamble` cannot be generic for every backend.** A PhysiCell project is
+  not reopenable from its data directory alone, so the generic one-argument form would emit a
+  script that does not run. This is the function most likely to be forgotten by a new backend.
+- **Registration order.** A backend registers its simulator in its own `__init__`, so it must
+  be loaded before `launch` is called, not necessarily before Studio.
+
+---
+
 ## Feature: Parameter browser — **implemented as a generic XML walk**
 
 **Behavior.** After choosing a varied location, the user narrows through a chain of dropdowns

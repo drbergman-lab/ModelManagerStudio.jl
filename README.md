@@ -29,10 +29,23 @@ Every simulation campaign starts the same way: choose input folders, decide whic
 
 ModelManagerStudio targets `ModelManager` itself, so it is not specific to any one simulator. Simulator-specific knowledge — which parameters exist, what they are called, how they are grouped — reaches the GUI through a package extension.
 
+`PhysiCellModelManager` is a **weak** dependency: Studio installs and loads without it, and the
+PhysiCell integration activates when you load both.
+
+```julia
+using PhysiCellModelManager   # or another ModelManager backend
+using ModelManagerStudio
+launch("path/to/project")
+```
+
 | Backend | Status |
 |---|---|
-| [PhysiCellModelManager.jl](https://github.com/drbergman-lab/PhysiCellModelManager.jl) (PCMM) | supported |
-| Any other `ModelManager.AbstractSimulator` | generic parameter browser only, no curated labels yet |
+| [PhysiCellModelManager.jl](https://github.com/drbergman-lab/PhysiCellModelManager.jl) | supported, via `StudioPhysiCellModelManagerExt` |
+| Any other `ModelManager.AbstractSimulator` | works on the generic defaults; add an extension for its project layout |
+
+A backend extension supplies three things: where its projects live on disk, what a reproducible
+script says to reopen one, and how to point a lost user at its project-creation function. The
+parameter browser needs nothing — it walks the location's base XML.
 
 ## Installation
 

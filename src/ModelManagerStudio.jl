@@ -1,18 +1,26 @@
 module ModelManagerStudio
 
 # Write your package code here.
-using QML, PhysiCellModelManager, LightXML, Compat, Distributions
+using QML, LightXML, Compat, Distributions
 import InteractiveUtils
 
-#! ModelManager is imported directly, not reached through PhysiCellModelManager.
-#! PCMM `@reexport using ModelManager`, so MM's *exported* names resolve as
-#! `PhysiCellModelManager.x` — but `variationTarget` and `variationValues` are NOT
-#! exported by MM, so `PhysiCellModelManager.variationTarget` is an UndefVarError on
-#! PCMM >= 0.3 (where MM was split out). Importing MM under an alias also makes the
-#! framework-agnostic boundary explicit: everything reached as `MM.` is generic, and
-#! everything still reached as `PhysiCellModelManager.` is PhysiCell-specific and
-#! belongs behind an extension point.
+#! ModelManager is the only model-management dependency. A simulator backend
+#! (PhysiCellModelManager, BergiCellModelManager, ...) is a `[weakdeps]` entry reached through
+#! a package extension, so Studio builds and loads without any particular simulator.
+#!
+#! Names MM exports but does not re-export cleanly are reached as `MM.` deliberately:
+#! `variationTarget` and `variationValues` are NOT exported by MM, so going through a
+#! re-exporting backend was an UndefVarError that only showed at runtime.
 import ModelManager as MM
+#! Also brought in unqualified, because Studio constructs MM's exported types directly
+#! (`InputFolders`, `ElementaryVariation`, `DiscreteVariation`, `DistributedVariation`) and
+#! calls its exported `run`. These used to arrive via the backend's re-export of MM, which is
+#! exactly the coupling this extension split removes.
+using ModelManager
+
+#! Imported by the backend extensions, which add methods to these.
+@compat public studio_open_project, studio_transcript_preamble, studio_no_project_message,
+               studio_project_is_open
 
 #! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
 #! backwards: `main` (which a user never calls interactively) was exported while `launch`
@@ -22,6 +30,7 @@ import ModelManager as MM
 #! ModelManager, QML, Distributions or LightXML.
 export launch, main
 
+include("backend.jl")
 include("colors.jl")
 include("base_documents.jl")
 include("value_parser.jl")
@@ -116,58 +125,26 @@ Internal function to initialize the Model Manager with the specified arguments.
 Called by [`init_model_manager_gui`](@ref).
 """
 function studio_initialize_model_manager(args::Vararg{AbstractString})
-    #! With no arguments, adopt whatever project is already initialized rather than
-    #! re-initializing from the working directory. This matters because the simulator package
-    #! attempts initialization in its own `__init__`, and a user may also have called
-    #! `initializeModelManager("path/to/project")` explicitly before launching. Deriving paths
-    #! from `pwd()` in that situation would point Studio at a different project than the one
-    #! the session is actually using -- or fail outright, from a directory that is perfectly
-    #! valid to launch from.
-    #!
-    #! Explicit arguments always win: passing a path means you mean it.
-    if isempty(args) && _model_manager_is_initialized()
-        model_manager_studio_info("Using the already-initialized project at $(MM.dataDir()).")
+    sim = studio_backend()
+    if isnothing(sim)
+        model_manager_studio_error(studio_no_backend_message())
+        return false
+    end
+
+    #! With no arguments, adopt whatever project is already open rather than re-deriving paths
+    #! from the working directory. The backend package attempts initialization in its own
+    #! `__init__`, and the user may have called `initializeModelManager` explicitly before
+    #! launching; re-deriving would point Studio at a different project, or fail from a
+    #! directory that is perfectly valid to launch from. Explicit arguments always win.
+    if isempty(args) && studio_project_is_open()
+        model_manager_studio_info("Using the already-open project at $(MM.dataDir()).")
         return true
     end
 
-    path_to_physicell, path_to_data = get_pcmm_paths(args...)
-    initializeModelManager(path_to_physicell, path_to_data)
-    return _model_manager_is_initialized()
+    return studio_open_project(sim, args...)
 end
 
-"""
-    _model_manager_is_initialized()
 
-Whether a project is currently initialized, without assuming a simulator has registered.
-
-`ModelManager.isInitialized` reads `mm_globals()`, which asserts when no simulator package has
-populated `mm_globals_ref[]` — so calling it unguarded turns "no backend loaded" into an
-`AssertionError` rather than a `false`.
-"""
-function _model_manager_is_initialized()
-    isnothing(MM.mm_globals_ref[]) && return false
-    return MM.isInitialized()
-end
-
-"""
-    get_pcmm_paths(args::Vararg{AbstractString})
-
-Get the PhysiCell and data directories from the provided arguments.
-See [`launch`](@ref) for details on how the arguments are interpreted.
-"""
-function get_pcmm_paths(args::Vararg{AbstractString})
-    @assert length(args) <= 2 "Expected at most 2 arguments, got $(length(args))"
-    if length(args) == 0
-        physicell_dir = "PhysiCell"
-        data_dir = "data"
-    elseif length(args) == 1
-        physicell_dir = joinpath(args[1], "PhysiCell")
-        data_dir = joinpath(args[1], "data")
-    else
-        physicell_dir, data_dir = args
-    end
-    return (physicell_dir, data_dir) .|> abspath .|> normpath
-end
 
 function get_folders(location::AbstractString, required::Bool)
     out = required ? String[] : String[NO_FOLDER_SENTINEL]

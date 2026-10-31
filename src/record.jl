@@ -25,8 +25,7 @@ function initialize_record()
     #
     # Date created: $(current_time)
 
-    using PhysiCellModelManager, Distributions
-    initializeModelManager(\"$(PhysiCellModelManager.physicellDir())\", \"$(MM.dataDir())\")\n
+    $(studio_transcript_preamble(studio_backend()))
     """
     open(path_to_record, "w") do file
         write(file, msg)
