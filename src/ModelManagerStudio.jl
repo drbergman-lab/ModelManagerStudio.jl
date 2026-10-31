@@ -1,20 +1,55 @@
 module ModelManagerStudio
 
 # Write your package code here.
-using QML, PhysiCellModelManager, LightXML, Compat, Distributions
+using QML, LightXML, Compat, Distributions
+import InteractiveUtils
 
-export main
+#! ModelManager is the only model-management dependency. A simulator backend
+#! (PhysiCellModelManager, BergiCellModelManager, ...) is a `[weakdeps]` entry reached through
+#! a package extension, so Studio builds and loads without any particular simulator.
+#!
+#! Names MM exports but does not re-export cleanly are reached as `MM.` deliberately:
+#! `variationTarget` and `variationValues` are NOT exported by MM, so going through a
+#! re-exporting backend was an UndefVarError that only showed at runtime.
+import ModelManager as MM
+#! Also brought in unqualified, because Studio constructs MM's exported types directly
+#! (`InputFolders`, `ElementaryVariation`, `DiscreteVariation`, `DistributedVariation`) and
+#! calls its exported `run`. These used to arrive via the backend's re-export of MM, which is
+#! exactly the coupling this extension split removes.
+using ModelManager
 
-@compat public launch
+#! Imported by the backend extensions, which add methods to these.
+@compat public studio_open_project, studio_transcript_preamble, studio_no_project_message,
+               studio_token_color, studio_project_is_open, token_name
 
+#! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
+#! backwards: `main` (which a user never calls interactively) was exported while `launch`
+#! (which is the documented entry point, and what README and the tests use) was only
+#! `@compat public`, so `using ModelManagerStudio; launch()` -- the documented invocation --
+#! raised UndefVarError. Verified no `launch` export collides across PhysiCellModelManager,
+#! ModelManager, QML, Distributions or LightXML.
+export launch, main
+
+include("backend.jl")
 include("colors.jl")
+include("base_documents.jl")
+include("value_parser.jl")
 include("record.jl")
-VERSION >= v"1.11" && include("main.jl")
+#! Unconditional: main.jl itself chooses between the `@main` entrypoint (1.11+) and a plain
+#! exported `main` function, so the LTS this package claims compat with is not left with an
+#! exported name that does not exist.
+include("main.jl")
 
 global current_required_locations
 global current_optional_locations
 global inputs
 global tokens_avs = Tuple[]
+
+#! What an optional location's dropdown shows when no folder is chosen. Defined once and
+#! handed to QML in `create_project_configuration_properties`, because it was a magic string
+#! duplicated on both sides of the Julia/QML boundary -- exactly the kind of literal that
+#! drifts when one side changes.
+const NO_FOLDER_SENTINEL = "--NONE--"
 
 
 """
@@ -55,11 +90,26 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
 
     initialize_record()
 
-    @qmlfunction get_folders joinpath set_input_folders run_simulation get_input_folder get_next_model get_varied_locations get_substrate_names
-    @qmlfunction get_cell_type_names get_target_path create_variation get_current_variations variation_exists location_label is_varied_location
+    #! Every name here must exist; `@qmlfunction` on a deleted one is an UndefVarError at
+    #! launch, from inside the macro, which is how the removed vocabulary helpers showed up.
+    @qmlfunction get_folders set_input_folders get_input_folder get_varied_locations
+    @qmlfunction get_next_model get_token_kinds get_token_colors get_target_path is_resolvable_target
+    @qmlfunction create_variation get_current_variations variation_exists
+    @qmlfunction delete_variation clear_variations
+    @qmlfunction value_spec_error variation_blocker allowed_distribution_names
+    @qmlfunction run_simulation location_label is_varied_location
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
+
+    #! Pin the Qt Quick Controls style. On macOS the "NativeStyle" plugin shipped with the
+    #! Qt6 build in jlqml_jll segfaults while drawing a ComboBox
+    #! (objc_msgSend -> QMacStylePrivate::drawNSViewInRect -> QMacStyle::drawComplexControl).
+    #! Note QT_QPA_PLATFORM=offscreen does NOT avoid this: the platform plugin and the
+    #! controls style are chosen independently. "Basic" is also the only style that honors
+    #! the custom `background` Rectangles this GUI defines, so the look is unchanged.
+    #! Respect an explicit user choice.
+    get!(ENV, "QT_QUICK_CONTROLS_STYLE", "Basic")
 
     # See if in testing mode
     testing = get(ENV, "MODEL_MANAGER_STUDIO_TESTING", "false") == "true"
@@ -75,34 +125,30 @@ Internal function to initialize the Model Manager with the specified arguments.
 Called by [`init_model_manager_gui`](@ref).
 """
 function studio_initialize_model_manager(args::Vararg{AbstractString})
-    path_to_physicell, path_to_data = get_pcmm_paths(args...)
-    initializeModelManager(path_to_physicell, path_to_data)
-    return PhysiCellModelManager.isInitialized()
-end
-
-"""
-    get_pcmm_paths(args::Vararg{AbstractString})
-
-Get the PhysiCell and data directories from the provided arguments.
-See [`launch`](@ref) for details on how the arguments are interpreted.
-"""
-function get_pcmm_paths(args::Vararg{AbstractString})
-    @assert length(args) <= 2 "Expected at most 2 arguments, got $(length(args))"
-    if length(args) == 0
-        physicell_dir = "PhysiCell"
-        data_dir = "data"
-    elseif length(args) == 1
-        physicell_dir = joinpath(args[1], "PhysiCell")
-        data_dir = joinpath(args[1], "data")
-    else
-        physicell_dir, data_dir = args
+    sim = studio_backend()
+    if isnothing(sim)
+        model_manager_studio_error(studio_no_backend_message())
+        return false
     end
-    return (physicell_dir, data_dir) .|> abspath .|> normpath
+
+    #! With no arguments, adopt whatever project is already open rather than re-deriving paths
+    #! from the working directory. The backend package attempts initialization in its own
+    #! `__init__`, and the user may have called `initializeModelManager` explicitly before
+    #! launching; re-deriving would point Studio at a different project, or fail from a
+    #! directory that is perfectly valid to launch from. Explicit arguments always win.
+    if isempty(args) && studio_project_is_open()
+        model_manager_studio_info("Using the already-open project at $(MM.dataDir()).")
+        return true
+    end
+
+    return studio_open_project(sim, args...)
 end
+
+
 
 function get_folders(location::AbstractString, required::Bool)
-    out = required ? String[] : String["--NONE--"]
-    location_directory = location |> Symbol |> PhysiCellModelManager.locationPath
+    out = required ? String[] : String[NO_FOLDER_SENTINEL]
+    location_directory = location |> Symbol |> MM.locationPath
     folders = readdir(location_directory; join=true)
     filter!(isdir, folders)
     append!(out, basename.(folders))
@@ -114,10 +160,13 @@ function set_input_folders()
 
     kwargs = Dict{Symbol, String}()
     for loc in current_required_locations ∪ current_optional_locations
-        kwargs[Symbol(loc.location)] = loc.folder == "--NONE--" ? "" : loc.folder
+        kwargs[Symbol(loc.location)] = loc.folder == NO_FOLDER_SENTINEL ? "" : loc.folder
     end
 
     inputs = InputFolders(; kwargs...)
+
+    #! Documents cached against the previous selection are now stale.
+    invalidate_base_documents!()
 
     model_manager_studio_info(string(inputs))
 
@@ -130,272 +179,177 @@ function get_input_folder(location::AbstractString)
         return "inputs not set"
     end
     out = inputs[Symbol(location)].folder
-    return isempty(out) ? "--NONE--" : out
+    return isempty(out) ? NO_FOLDER_SENTINEL : out
 end
 
-function get_substrate_names()
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    microenvironment_element = PhysiCellModelManager.retrieveElement(xml_doc, ["microenvironment_setup"])
-    substrate_names = String[]
-    for ce in get_elements_by_tagname(microenvironment_element, "variable")
-        push!(substrate_names, attribute(ce, "name"))
-    end
-    return substrate_names
-end
 
-function get_cell_type_names()
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    cell_types_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions"])
-    cell_type_names = String[]
-    for ce in get_elements_by_tagname(cell_types_element, "cell_definition")
-        push!(cell_type_names, attribute(ce, "name"))
-    end
-    return cell_type_names
-end
 
-function get_custom_tags()
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    return [name(ce) for ce in (PhysiCellModelManager.retrieveElement(xml_doc, ["cell_definitions", "cell_definition", "custom_data"]) |> child_elements)]
-end
 
-function get_user_parameter_names()
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    user_parameters_element = PhysiCellModelManager.retrieveElement(xml_doc, ["user_parameters"])
-    return [name(ce) for ce in child_elements(user_parameters_element)]
-end
 
-function get_cycle_model_phase_tag(cell_type::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type))
-    is_rate = find_element(cycle_model_element, "phase_durations") |> isnothing
-    return is_rate ? "rate" : "duration"
-end
 
-function get_cycle_model_phase_indexes(cell_type::AbstractString, cycle_model_phase_tag::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    if cycle_model_phase_tag == "rate"
-        tag = "phase_transition_rates"
-        attr_name = "start_index"
-    else
-        tag = "phase_durations"
-        attr_name = "index"
-    end
-    cycle_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cyclePath(cell_type, tag))
-    return [attribute(ce, attr_name) for ce in child_elements(cycle_model_element)]
-end
 
-function get_death_model_phase_tag(cell_type::AbstractString, death_model::Symbol)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    death_model_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.deathPath(cell_type, "model:name:$(death_model)"))
-    is_rate = find_element(death_model_element, "phase_durations") |> isnothing
-    base_name = is_rate ? "transition_rate" : "duration"
-    if death_model == :apoptosis
-        return base_name
-    elseif death_model == :necrosis
-        return ["$(base_name)_$(i)" for i in 0:1]
-    end
-end
 
-function get_initial_parameter_distribution_behaviors(cell_type::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions"))
-    behaviors = String[]
-    for ce in get_elements_by_tagname(initial_parameter_distribution_element, "distribution")
-        ce_child = find_element(ce, "behavior")
-        push!(behaviors, content(ce_child))
-    end
-    return behaviors
-end
 
-function get_initial_parameter_distribution_behavior_tags(cell_type::AbstractString, behavior::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:config])
-    xml_doc = parse_file(path_to_xml)
-    initial_parameter_distribution_element = PhysiCellModelManager.retrieveElement(xml_doc, PhysiCellModelManager.cellDefinitionPath(cell_type, "initial_parameter_distributions", "distribution::behavior:$(behavior)"))
-    return [n for n in (initial_parameter_distribution_element |> child_elements .|> name) if n != "behavior"]
-end
 
-function config_single_tokens()
-    return [
-        get_cell_type_names();
-        get_substrate_names();
-        "x_min"; "x_max"; "y_min"; "y_max"; "z_min"; "z_max"; "dx"; "dy"; "dz"; "use_2D";
-        "max_time"; "dt_intracellular"; "dt_diffusion"; "dt_mechanics"; "dt_phenotype";
-        "full_data_save_interval"; "svg_data_save_interval";
-        "user_parameter"
-    ]
-end
 
-function config_second_tokens(first_token::AbstractString)
-    if isempty(first_token)
-        return String[]
-    elseif first_token == "user_parameter"
-        return get_user_parameter_names()
-    elseif first_token ∈ get_substrate_names()
-        return [
-            "diffusion_coefficient"; "decay_rate";
-            "initial_condition"; "universal_dirichlet_boundary_condition";
-            "individual_dirichlet_boundary_condition"
-        ]
-    elseif first_token ∈ get_cell_type_names()
-        return [
-            get_substrate_names();
-            "cycle"; "apoptosis"; "necrosis"; "adhesion"; "motility"; "chemotaxis"; "advanced_chemotaxis"; "phagocytosis"; "fusion"; "transformation"; "attack_rate";
-            "total"; "fluid_fraction"; "nuclear"; "fluid_change_rate"; "cytoplasmic_biomass_change_rate"; "nuclear_biomass_change_rate"; "calcified_fraction"; "calcification_rate"; "relative_rupture_volume";
-            "set_relative_equilibrium_distance"; "set_absolute_equilibrium_distance";
-            "speed"; "persistence_time"; "migration_bias";
-            "apoptotic_phagocytosis_rate"; "necrotic_phagocytosis_rate"; "other_dead_phagocytosis_rate"; "attack_damage_rate"; "attack_duration";
-            "damage_rate"; "damage_repair_rate";
-            ["custom:$(tag)" for tag in get_custom_tags()];
-            "initial_parameter_distribution"
-        ]
-    else
-        return String[]
-    end
-end
 
-function config_third_tokens(first_token::AbstractString, second_token::AbstractString)
-    if second_token == "individual_dirichlet_boundary_condition"
-        return ["xmin"; "xmax"; "ymin"; "ymax"; "zmin"; "zmax"]
-    elseif second_token ∈ ["apoptosis", "necrosis"]
-        return ["death_rate"; "unlysed_fluid_change_rate"; "lysed_fluid_change_rate"; "cytoplasmic_biomass_change_rate"; "nuclear_biomass_change_rate"; "calcification_rate"; "relative_rupture_volume";
-            get_death_model_phase_tag(first_token, Symbol(second_token))]
-    elseif second_token ∈ ["adhesion", "phagocytosis", "fusion", "transformation", "attack_rate"]
-        return get_cell_type_names()
-    elseif second_token == "motility"
-        return ["speed"; "persistence_time"; "migration_bias"; "enabled"; "use_2D"]
-    elseif second_token == "chemotaxis"
-        return ["enabled"; "substrate"; "direction"]
-    elseif second_token == "advanced_chemotaxis"
-        return [get_substrate_names(); "enabled"; "normalize_each_gradient"]
-    elseif second_token ∈ get_substrate_names()
-        return ["secretion_rate"; "secretion_target"; "uptake_rate"; "net_export_rate"]
-    elseif second_token == "custom"
-        return get_custom_tags()
-    elseif second_token == "cycle"
-        return [get_cycle_model_phase_tag(first_token)]
-    elseif second_token == "initial_parameter_distribution"
-        return get_initial_parameter_distribution_behaviors(first_token)
-    else
-        return String[]
-    end
-end
 
-function config_fourth_tokens(first_token::AbstractString, second_token::AbstractString, third_token::AbstractString)
-    if second_token == "cycle"
-        return get_cycle_model_phase_indexes(first_token, third_token)
-    elseif second_token == "initial_parameter_distribution"
-        return get_initial_parameter_distribution_behavior_tags(first_token, third_token)
-    else
-        return String[]
-    end
-end
 
+"""
+    get_next_model(tokens::Vararg{AbstractString})
+
+Child tokens for the chain `tokens` (first entry is the location). Called from QML.
+"""
 function get_next_model(tokens::Vararg{AbstractString})
-    tokens = [String.(tokens)...]
-    location = popfirst!(tokens)
-    return get_tokens(String(location), tokens)
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    return get_tokens(String(location), toks)
 end
 
+#! Attributes used to tell same-tag siblings apart, in priority order. Mirrors the priority in
+#! ModelManager's own `recurseToGetParameterValues!` ("name", "ID", "id"), so a browser token
+#! matches the column name MM gives the same parameter, plus "type" for the IC files.
+const ID_ATTRIBUTES = ["name", "ID", "id", "type"]
+
+"""
+    get_tokens(location, previous_tokens)
+
+Child tokens of the element at `previous_tokens` in `location`'s base document; `String[]` at a
+leaf, or when the document is unavailable.
+
+A plain walk of the XML. Tokens ARE path elements, so a chain is an `XMLPath` and the target is
+`columnName` of it — there is no translation table to keep in step with the simulator's own
+path builders, and no vocabulary that can disagree with them.
+
+Termination is structural: a finite document, one token per level, nothing below a leaf.
+"""
 function get_tokens(location::AbstractString, previous_tokens::Vector{String})
-    global inputs
-    if !isdefined(ModelManagerStudio, :inputs)
-        return String[]
-    end
-    n_tokens = length(previous_tokens)
-    if location == "config"
-        if n_tokens == 0
-            return config_single_tokens()
-        elseif n_tokens == 1
-            return config_second_tokens(previous_tokens[1])
-        elseif n_tokens == 2
-            return config_third_tokens(previous_tokens[1], previous_tokens[2])
-        else
-            return config_fourth_tokens(previous_tokens[1], previous_tokens[2], previous_tokens[3])
-        end
-    elseif location == "rulesets_collection"
-        if n_tokens == 0
-            return get_cell_type_names()
-        elseif n_tokens == 1
-            return get_ruled_behaviors(previous_tokens[1])
-        else
-            return get_next_rule_tags(previous_tokens...)
-        end
-    elseif location == "ic_cell"
-        if n_tokens == 0
-            return get_cell_type_names()
-        elseif n_tokens == 1
-            return get_patch_types(previous_tokens[1])
-        else
-            return get_next_ic_cell_tags(previous_tokens...)
-        end
+    element = _element_at(location, previous_tokens)
+    isnothing(element) && return String[]
+    return get_next_xml_path_elements(element, ID_ATTRIBUTES)
+end
+
+"""
+    _element_at(location, chain)
+
+The element `chain` names in `location`'s base document, or `nothing`. Never throws: an
+unselected folder, a location this project lacks, and a path that is not in the document all
+come back as `nothing`, because every caller is reached from a QML callback.
+"""
+function _element_at(location::AbstractString, chain::Vector{String})
+    doc = base_document(Symbol(location))
+    isnothing(doc) && return nothing
+    path = [t for t in chain if !isempty(t)]
+    #! `retrieveElement` starts at the root, so an empty chain needs no special case.
+    return try
+        MM.retrieveElement(doc, path; required=false)
+    catch
+        nothing
     end
 end
 
-function get_ruled_behaviors(cell_type::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
-    xml_doc = parse_file(path_to_xml)
-    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(cell_type)"]; required=false)
-    if isnothing(rules_element)
-        model_manager_studio_info("No behavior ruleset found for cell type: $cell_type")
-        return String[]
+"""
+    token_name(token)
+
+The *name* an attribute-disambiguated token carries, or `""` for a plain structural tag.
+
+`"cell_definition:name:tumor"` yields `"tumor"`. Provided for backends writing a
+[`studio_token_color`](@ref) method: deciding that a token names one of the model's cell
+definitions means comparing that name against the ones the model declares.
+
+Split with `limit=3` to match `retrieveElement`, so a name containing a colon survives intact.
+"""
+function token_name(token::AbstractString)
+    parts = split(String(token), ':'; limit=3)
+    return length(parts) == 3 ? String(parts[3]) : ""
+end
+
+#! A colour the browser can actually draw. Anything else from a backend is dropped rather than
+#! handed to QML, where an unparseable `color:` is a binding warning and an invisible token.
+const HEX_COLOR = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+
+"""
+    get_token_colors(tokens::Vararg{AbstractString})
+
+Hex colour per entry, parallel to [`get_next_model`](@ref); `""` where the backend gave none, in
+which case the GUI uses its own default. Called from QML.
+
+The colour is the backend's statement that an entry belongs to a category of its model -- a cell
+definition, a substrate -- so that the category reads the same everywhere it appears.
+"""
+function get_token_colors(tokens::Vararg{AbstractString})
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    candidates = get_next_model(String(location), toks...)
+    sim = studio_backend()
+    isnothing(sim) && return fill("", length(candidates))
+    chain = [t for t in toks if !isempty(t)]
+    return [token_color(sim, Symbol(location), chain, t) for t in candidates]
+end
+
+"""
+    token_color(sim, location, chain, token)
+
+[`studio_token_color`](@ref) reduced to a hex string or `""`.
+
+Never throws and never returns something QML cannot draw: this is reached from a property
+binding, where a backend's bad return value would otherwise surface as a Qt warning on a token
+the user is looking at.
+"""
+function token_color(sim, location::Symbol, chain::Vector{String}, token::AbstractString)
+    raw = try
+        studio_token_color(sim, location, chain, token)
+    catch e
+        model_manager_studio_debug("studio_token_color failed for $(token): $(sprint(showerror, e))")
+        return ""
     end
-    return [attribute(ce, "name") for ce in get_elements_by_tagname(rules_element, "behavior")]
+    (isnothing(raw) || ismissing(raw)) && return ""
+    raw isa AbstractString || return ""
+    hex = String(raw)
+    if !occursin(HEX_COLOR, hex)
+        model_manager_studio_debug("studio_token_color returned $(repr(hex)) for $(token), which is not a hex colour.")
+        return ""
+    end
+    return hex
 end
 
-function get_next_rule_tags(tokens::Vararg{AbstractString})
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:rulesets_collection])
-    xml_doc = parse_file(path_to_xml)
-    rules_element = PhysiCellModelManager.retrieveElement(xml_doc, ["behavior_ruleset:name:$(tokens[1])"; "behavior:name:$(tokens[2])"; tokens[3:end]...])
-    return get_next_xml_path_elements(rules_element, ["name"])
+"""
+    get_token_kinds(tokens::Vararg{AbstractString})
+
+`"branch"` or `"leaf"` per entry, parallel to [`get_next_model`](@ref). Called from QML to mark
+which entries open another menu.
+"""
+function get_token_kinds(tokens::Vararg{AbstractString})
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    chain = [t for t in toks if !isempty(t)]
+    return map(get_next_model(String(location), toks...)) do t
+        child = _element_at(String(location), [chain; t])
+        (isnothing(child) || MM.elementIsTerminal(child)) ? "leaf" : "branch"
+    end
 end
 
-function get_patch_types(cell_type::AbstractString)
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
-    xml_doc = parse_file(path_to_xml)
-    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(cell_type)"])
-    return [attribute(ce, "type") for ce in get_elements_by_tagname(ic_element, "patch_collection")]
-end
 
-function get_next_ic_cell_tags(tokens::Vararg{AbstractString})
-    global inputs
-    path_to_xml = PhysiCellModelManager.prepareBaseFile(inputs[:ic_cell])
-    xml_doc = parse_file(path_to_xml)
-    ic_element = PhysiCellModelManager.retrieveElement(xml_doc, ["cell_patches:name:$(tokens[1])"; "patch_collection:type:$(tokens[2])"; String.(tokens[3:end])...])
-    return get_next_xml_path_elements(ic_element, ["type", "ID"])
-end
+
+
 
 function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String})
     child_elements_ = child_elements(e)
-    temp_dict = Dict()
+    #! Group children by tag, preserving document order. An untyped `Dict` here made the
+    #! ComboBox ordering vary between runs, since Dict iteration order is unspecified.
+    tag_order = String[]
+    grouped = Dict{String,Vector{XMLElement}}()
     for ce in child_elements_
         tag = name(ce)
-        if tag ∉ keys(temp_dict)
-            temp_dict[tag] = []
+        if !haskey(grouped, tag)
+            push!(tag_order, tag)
+            grouped[tag] = XMLElement[]
         end
-        push!(temp_dict[tag], ce)
+        push!(grouped[tag], ce)
     end
     out = String[]
-    for (tag, ces) in temp_dict
+    for tag in tag_order
+        ces = grouped[tag]
         if length(ces) == 1
             unique_attrs = [a for a in id_attributes if has_attribute(ces[1], a)]
             next_val = isempty(unique_attrs) ? tag : "$(tag):$(unique_attrs[1]):$(attribute(ces[1], unique_attrs[1]))"
@@ -417,7 +371,11 @@ function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String}
         if unique_attribute == ""
             push!(out, "$(tag) (ambiguous)")
         else
-            append!(out, ["$(tag):$(attribute(ce, unique_attribute))" for ce in ces])
+            #! Three parts, not two. `ModelManager.retrieveElement` splits a token on ":"
+            #! with `limit=3` and `getChildByAttribute` destructures exactly three values,
+            #! so a "tag:value" token raises a BoundsError once the path is resolved. The
+            #! single-child branch above already emitted three parts; this one did not.
+            append!(out, ["$(tag):$(unique_attribute):$(attribute(ce, unique_attribute))" for ce in ces])
         end
     end
     return out
@@ -431,64 +389,105 @@ function get_varied_locations()
     return [f.location for f in values(inputs.input_folders) if f.varied] .|> String
 end
 
+#! Sentinel prefix for a target path that could not be resolved. `get_target_path` has to
+#! return a String because QML can only receive primitives, so failure is encoded in the
+#! string — but it is encoded in ONE place with ONE marker, and `is_resolvable_target` is the
+#! only thing allowed to interpret it. Previously each failure invented its own prose
+#! ("INVALID PATH", "Invalid rule path: not enough tokens"), and nothing checked for them.
+const TARGET_ERROR_PREFIX = "\u26a0 "
+
+target_error(msg::AbstractString) = TARGET_ERROR_PREFIX * msg
+
+"""
+    is_resolvable_target(target::AbstractString)
+
+Whether `target` is a real parameter path rather than a placeholder or an error report from
+[`get_target_path`](@ref). The GUI uses this to gate variation creation.
+"""
+function is_resolvable_target(target::AbstractString)
+    t = strip(String(target))
+    return !isempty(t) && !startswith(t, TARGET_ERROR_PREFIX)
+end
+
+"""
+    get_target_path(location, tokens...)
+
+The display path for the chain, or a [`target_error`](@ref) when it does not name a parameter.
+
+The chain is already the XML path, so this is just its column name. It replaces a per-location
+dispatch onto the simulator's path builders (`configPath`, `rulePath`, `icCellsPath`,
+`icECMPath`) — each of which could disagree with the token vocabulary that fed it, which is
+exactly how unresolvable targets arose.
+"""
 function get_target_path(location::AbstractString, tokens::Vararg{AbstractString})
-    if location == "config"
-        return get_config_path(tokens...)
-    elseif location == "rulesets_collection"
-        length(tokens) < 3 && return "Invalid rule path: not enough tokens"
-        return rulePath(tokens...) |> PhysiCellModelManager.columnName
-    elseif location == "ic_cell"
-        length(tokens) < 3 && return "Invalid ic_cell path: not enough tokens"
-        tokens = [String.(tokens)...]
-        tokens[3] = split(tokens[3], ":")[end] # just get the ID part since icCellsPath just needs the ID (this gui is showing the ID to help make it make sense for the user)
-        if length(tokens) > 4
-            @assert tokens[4] == "carveout_patches" "Expected 'carveout_patches' as the fourth token for ic_cell location"
-            tokens[5] = split(tokens[5], ":")[end] # just get the carveout patch type
-            tokens[6] = split(tokens[6], ":")[end] # just get the carveout patch ID
-            popat!(tokens, 4) # remove 'carveout_patches' token since icCellsPath doesn't need it
-        end
-        return icCellsPath(String.(tokens)...) |> PhysiCellModelManager.columnName
-    elseif location == "ic_ecm"
-        length(tokens) < 3 && return "Invalid ic_ecm path: not enough tokens"
-        return icECMPath(tokens...) |> PhysiCellModelManager.columnName
-    else
-        return [t for t in String.(tokens) if !isempty(t)] |> PhysiCellModelManager.columnName
+    chain = [t for t in String.(tokens) if !isempty(t)]
+    isempty(chain) && return target_error("Choose a parameter.")
+
+    element = _element_at(location, chain)
+    isnothing(element) && return target_error("Not a parameter in this model.")
+    MM.elementIsTerminal(element) || return target_error("Keep going — this is not a parameter yet.")
+
+    return MM.columnName(MM.XMLPath(chain))
+end
+
+
+"""
+    value_spec_error(spec::AbstractString)
+
+Return `""` if `spec` is a usable variation value, or a message explaining why it is not.
+Never throws. Called from QML on every keystroke so the Create/Edit button can be disabled
+with a stated reason instead of silently doing nothing when clicked.
+
+An empty `spec` is "incomplete", not "wrong", and returns `""` — the button is already gated
+on non-empty text, and showing an error before the user has typed anything is noise.
+"""
+function value_spec_error(spec::AbstractString)
+    isempty(strip(String(spec))) && return ""
+    try
+        parse_value_spec(spec)
+        return ""
+    catch e
+        e isa ValueSpecError || rethrow()
+        return sprint(showerror, e)
     end
 end
 
-function get_config_path(tokens::Vararg{AbstractString})
-    tokens = [tokens...]
-    if length(tokens) > 1
-        if tokens[2] == "universal_dirichlet_boundary_condition"
-            tokens[2] = "Dirichlet_boundary_condition"
-        elseif tokens[2] == "individual_dirichlet_boundary_condition"
-            tokens[2] = "Dirichlet_options"
-        end
-    end
-    s = "INVALID PATH"
-    try
-        s = configPath([t for t in String.(tokens) if !isempty(t)]...) |> PhysiCellModelManager.columnName
-    catch e
-        model_manager_studio_warn("Invalid configuration path:\n\t$(join(tokens, " > "))")
-        model_manager_studio_debug("Error details: $(e.msg)")
-    end
-    return s
+"""
+    variation_blocker(target::AbstractString, vals::AbstractString)
+
+Return `""` when a variation can be created from `target` and `vals`, or the reason it cannot.
+The single predicate behind the button's enabled state, so the UI cannot disagree with what
+[`create_variation`](@ref) will actually accept.
+"""
+function variation_blocker(target::AbstractString, vals::AbstractString)
+    is_resolvable_target(target) || return "Finish choosing a parameter."
+    isempty(strip(String(vals))) && return "Enter a value, list, range, or distribution."
+    return value_spec_error(vals)
 end
 
 function create_variation(target::AbstractString, vals::AbstractString, tokens::Vararg{AbstractString})
     global tokens_avs
     tokens = [t for t in String.(tokens) if !isempty(t)]
-    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
-    try
-        vals = vals |> Meta.parse |> eval
-    catch e
-        msg = """
-        Error parsing values for variation:
-          vals: $vals
-          error: $(e)
-        """
+
+    #! Refuse a target that is really an error message. `get_target_path` reports failure by
+    #! returning strings like "INVALID PATH", which the UI renders and then hands straight
+    #! back here. `columnNameToXMLPath` is just `split(s, "/")`, so those strings construct a
+    #! perfectly valid-looking ElementaryVariation that is written to the transcript and fails
+    #! only once the simulation runs.
+    if !is_resolvable_target(target)
+        msg = "Cannot create a variation: \"$(target)\" is not a parameter path. Finish choosing a parameter first."
         model_manager_studio_error(msg)
-        return
+        return msg
+    end
+
+    target = target |> String |> MM.columnNameToXMLPath
+    try
+        vals = parse_value_spec(vals)
+    catch e
+        e isa ValueSpecError || rethrow()
+        msg = "Could not use that value: $(sprint(showerror, e))"
+        model_manager_studio_error(msg)
+        return msg
     end
     if vals isa AbstractVector
         vals = collect(vals)
@@ -500,6 +499,9 @@ function create_variation(target::AbstractString, vals::AbstractString, tokens::
         tokens_avs[ind] = (tokens, ElementaryVariation(target, vals))
     end
     record_variations()
+    #! "" means success. QML shows a dialog when this comes back non-empty, so a failure is
+    #! visible in the window rather than only on stderr, which a windowed app cannot show.
+    return ""
 end
 
 function get_current_variations()
@@ -508,25 +510,82 @@ function get_current_variations()
 end
 
 function variation_exists(target::AbstractString)
-    target = target |> String |> PhysiCellModelManager.columnNameToXMLPath
+    is_resolvable_target(target) || return false
+    target = target |> String |> MM.columnNameToXMLPath
     return find_variation_index(target) |> !isnothing
+end
+
+"""
+    delete_variation(index::Int)
+
+Remove the variation at 1-based `index` from the pending design and rewrite the transcript.
+Returns `true` if a variation was removed.
+
+Called from QML. Until this existed, `tokens_avs` could only ever grow — a mistaken variation
+could be removed only by restarting the application.
+"""
+function delete_variation(index::Int)
+    global tokens_avs
+    if index < 1 || index > length(tokens_avs)
+        model_manager_studio_warn("No variation at position $(index) to delete.")
+        return false
+    end
+    deleteat!(tokens_avs, index)
+    record_variations()
+    return true
+end
+
+"""
+    clear_variations()
+
+Discard every pending variation and rewrite the transcript. Called from QML.
+"""
+function clear_variations()
+    global tokens_avs
+    empty!(tokens_avs)
+    record_variations()
+    return true
 end
 
 function find_variation_index(target::Vector{<:AbstractString})
     global tokens_avs
-    return findfirst(tokens_av -> PhysiCellModelManager.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
+    return findfirst(tokens_av -> MM.variationTarget(tokens_av[2]).xml_path == target, tokens_avs)
 end
 
+"""
+    run_simulation()
+
+Run the pending campaign and always report an outcome to the GUI.
+
+Called from QML. Still synchronous — the window is unresponsive for the duration — but a
+failure can no longer strand the interface. The non-blocking version is Phase 1 work; see
+[PRD.md](PRD.md), "Run and progress".
+"""
 function run_simulation()
     global inputs, tokens_avs
 
-    record_run()
-    
-    # Run the simulation with the provided inputs
-    run(inputs, [av for (_, av) in tokens_avs])
+    if !isdefined(ModelManagerStudio, :inputs)
+        model_manager_studio_error("Create inputs before running.")
+        @emit simulationFinished()
+        return
+    end
 
-    # Emit signal when simulation is complete
-    @emit simulationFinished()
+    avs = [av for (_, av) in tokens_avs]
+
+    #! `record_run` used to be called BEFORE the run, so a campaign that threw was still
+    #! written to the transcript as though it had happened — the one thing the transcript is
+    #! supposed to guarantee. Record only after a successful return.
+    try
+        run(inputs, avs)
+        record_run()
+    catch e
+        #! Without this, `@emit simulationFinished()` never fired: the run button stayed
+        #! disabled forever and the only trace was on stderr, which a windowed app has no
+        #! way to show. Always emit, so the UI can recover.
+        model_manager_studio_error("The run failed:\n$(sprint(showerror, e))")
+    finally
+        @emit simulationFinished()
+    end
 end
 
 model_manager_studio_info(message::AbstractString; kws...) = model_manager_studio_log(:info, message; kws...)
@@ -549,7 +608,7 @@ function model_manager_studio_log(type::Symbol, message::AbstractString; kws...)
 end
 
 function create_project_configuration_properties()
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     req_locs = [pl.required...]
     opt_locs = setdiff(pl.all, req_locs)
 
@@ -562,7 +621,8 @@ function create_project_configuration_properties()
     opt_n_rows = ceil(n_opt / max_per_row) |> Int
     opt_n_cols = min(max_per_row, n_opt)
     return JuliaPropertyMap("req_n_rows" => req_n_rows, "req_n_cols" => req_n_cols, "opt_n_rows" => opt_n_rows, "opt_n_cols" => opt_n_cols,
-        "req_locations" => String.(req_locs), "opt_locations" => String.(opt_locs))
+        "req_locations" => String.(req_locs), "opt_locations" => String.(opt_locs),
+        "no_folder_sentinel" => NO_FOLDER_SENTINEL)
 end
 
 function location_label(location::AbstractString)
@@ -574,14 +634,14 @@ function location_label(location::AbstractString)
     return uppercasefirst(out) * " folder"
 end
 
-is_varied_location(location::AbstractString) = Symbol(location) ∈ PhysiCellModelManager.projectLocations().varied
+is_varied_location(location::AbstractString) = Symbol(location) ∈ MM.projectLocations().varied
 
 function is_varied_location(location::AbstractString, folder::AbstractString)
     folder = String(folder)
-    if isempty(folder) || folder == "--NONE--"
+    if isempty(folder) || folder == NO_FOLDER_SENTINEL
         return false
     end
-    input_folder = PhysiCellModelManager.InputFolder(Symbol(location), folder)
+    input_folder = MM.InputFolder(Symbol(location), folder)
     return input_folder.varied
 end
 
@@ -593,7 +653,7 @@ end
 
 function required_input_folders()
     global current_required_locations
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     current_required_locations = MMSFolder[]
     for loc in pl.required
         loc_str = String(loc)
@@ -606,7 +666,7 @@ end
 
 function optional_input_folders()
     global current_optional_locations
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     current_optional_locations = MMSFolder[]
     for loc in setdiff(pl.all, pl.required)
         loc_str = String(loc)

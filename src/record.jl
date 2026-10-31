@@ -25,8 +25,7 @@ function initialize_record()
     #
     # Date created: $(current_time)
 
-    using PhysiCellModelManager, Distributions
-    initializeModelManager(\"$(PhysiCellModelManager.physicellDir())\", \"$(PhysiCellModelManager.dataDir())\")\n
+    $(studio_transcript_preamble(studio_backend()))
     """
     open(path_to_record, "w") do file
         write(file, msg)
@@ -36,7 +35,7 @@ end
 
 function record_inputs()
     global path_to_record, last_record, inputs
-    pl = PhysiCellModelManager.projectLocations()
+    pl = MM.projectLocations()
     required_args = join(["\"$(inputs[location].folder)\"" for location in pl.required], ", ")
     included_optional_locs = filter(location -> !isempty(inputs[location].folder), setdiff(pl.all, pl.required))
 
@@ -66,7 +65,7 @@ function record_variations()
     for token_av in tokens_avs
         avs_text *= """
 
-        xml_path = $(PhysiCellModelManager.variationTarget(token_av[2]).xml_path)
+        xml_path = $(MM.variationTarget(token_av[2]).xml_path)
         val = $(value_string(token_av[2]))
         push!(avs, ElementaryVariation(xml_path, val))
         """
@@ -101,7 +100,7 @@ function record_run()
     last_record = :run
 end
 
-value_string(dv::DiscreteVariation) = PhysiCellModelManager.variationValues(dv)
+value_string(dv::DiscreteVariation) = MM.variationValues(dv)
 
 function value_string(dv::DistributedVariation)
     d = dv.distribution
