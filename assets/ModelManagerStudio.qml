@@ -19,6 +19,28 @@ ApplicationWindow {
     property color unusedTint: "#e6e8ea"
     property color unusedTextColor: "#8a8f98"
 
+    // Colour for attribute-disambiguated tokens, so every cell definition shares one colour
+    // and every substrate another. Assigned per tag on first sight and remembered, so a tag
+    // keeps its colour across levels and reopens within a session.
+    //
+    // This replaces a hardcoded substrate/cell-type/custom-data test that needed the
+    // PhysiCell vocabulary. Keying on the tag is generic: it colours every kind of named
+    // instance any backend produces, not three known ones.
+    property var tagPalette: ["#206020", "#2060A0", "#8C5A14", "#6A3D9A", "#0F7F7F", "#A02020"]
+    property var tagColors: ({})
+    property int tagColorCursor: 0
+
+    function colorForTag(tag) {
+        if (!tag || tag === "")
+            return "#000000";
+
+        if (tagColors[tag] === undefined) {
+            tagColors[tag] = tagPalette[tagColorCursor % tagPalette.length];
+            tagColorCursor = tagColorCursor + 1;
+        }
+        return tagColors[tag];
+    }
+
     // Breathing room added to a ComboBox on top of its own padding and indicator width.
     // The token chain measures its widest entry with a hidden Text and sizes to that, but a
     // Text's implicitWidth is the glyph run alone -- it accounts for neither the control's
@@ -678,8 +700,9 @@ ApplicationWindow {
                                                 id: tokenComboBox
 
                                                 property int longestTextWidth: 0
-                                                // Branch/leaf per entry, index-parallel to `model`.
+                                                // Branch/leaf and tag per entry, index-parallel to `model`.
                                                 property var itemKinds: []
+                                                property var itemTags: []
 
                                                 // Search-within-a-level. The walk produces honest but deep
                                                 // paths, so a level can hold many siblings; typing narrows
@@ -714,6 +737,7 @@ ApplicationWindow {
                                                         toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
                                                     }
                                                     itemKinds = Julia.get_token_kinds.apply(Julia, toks);
+                                                    itemTags = Julia.get_token_tags.apply(Julia, toks);
                                                 }
 
                                                 function updateLongestTextWidth() {
@@ -754,6 +778,7 @@ ApplicationWindow {
 
                                                     property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
                                                     property bool matches: tokenComboBox.matchesFilter(modelData)
+                                                    property string tokenTag: index < tokenComboBox.itemTags.length ? tokenComboBox.itemTags[index] : ""
 
                                                     width: ListView.view ? ListView.view.width : implicitWidth
                                                     visible: matches
@@ -768,7 +793,12 @@ ApplicationWindow {
                                                         Text {
                                                             width: parent.width - (tokenItem.opensMenu ? 18 : 0)
                                                             text: modelData
-                                                            color: "#000000"
+                                                            color: mainWindow.colorForTag(tokenItem.tokenTag)
+                                                            // Bold marks a named instance from the model
+                                                            // (a cell definition, a substrate) as opposed to
+                                                            // a structural tag -- so the distinction survives
+                                                            // for anyone who cannot rely on colour.
+                                                            font.bold: tokenItem.tokenTag !== ""
                                                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
                                                             elide: Text.ElideRight
                                                             verticalAlignment: Text.AlignVCenter
@@ -852,6 +882,7 @@ ApplicationWindow {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
                                                         itemKinds = [];
+                                                        itemTags = [];
                                                         return ;
                                                     }
                                                     updateLongestTextWidth();

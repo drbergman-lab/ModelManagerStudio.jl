@@ -173,6 +173,31 @@ createProject()
         @test deep == "cell_definitions/cell_definition:name:default/phenotype/motility/speed"
     end
 
+    @testset "Token tags drive colouring" begin
+        T = ModelManagerStudio.token_tag
+        @test T("cell_definition:name:default") == "cell_definition"
+        @test T("variable:name:substrate") == "variable"
+        @test T("phenotype") == ""
+        @test T("") == ""
+
+        #! Parallel to the model, like kinds, since QML indexes all three together.
+        defs  = ModelManagerStudio.get_next_model("config", "cell_definitions")
+        tags  = ModelManagerStudio.get_token_tags("config", "cell_definitions")
+        @test length(tags) == length(defs)
+        @test all(==( "cell_definition"), tags)
+
+        #! Structural children carry no tag, so they stay uncoloured.
+        inner = ModelManagerStudio.get_next_model("config", "overall")
+        @test all(isempty, ModelManagerStudio.get_token_tags("config", "overall"))
+        @test !isempty(inner)
+
+        #! Substrates are a different tag from cell definitions, so they get a different
+        #! colour without anything knowing what a substrate is.
+        subs = ModelManagerStudio.get_token_tags("config", "microenvironment_setup")
+        @test "variable" in subs
+        @test !("cell_definition" in subs)
+    end
+
     @testset "Branch and leaf kinds" begin
         top   = ModelManagerStudio.get_next_model("config")
         kinds = ModelManagerStudio.get_token_kinds("config")
