@@ -6,6 +6,18 @@ import ModelManager as MM
 #! rather than relying on the workflow env so the suite is runnable locally.
 ENV["MODEL_MANAGER_STUDIO_TESTING"] = "true"
 
+#! A stand-in backend whose colour hook returns whatever it is told to, so the core's handling
+#! of a backend's return value can be tested without a backend that misbehaves on purpose.
+struct ColorProbe <: MM.AbstractSimulator
+    answer::Any
+end
+
+function ModelManagerStudio.studio_token_color(probe::ColorProbe, ::Symbol,
+                                               ::Vector{String}, ::AbstractString)
+    probe.answer === :throw && error("backend blew up")
+    return probe.answer
+end
+
 createProject()
 
 @testset "ModelManagerStudio.jl" begin
@@ -173,10 +185,12 @@ createProject()
         @test deep == "cell_definitions/cell_definition:name:default/phenotype/motility/speed"
     end
 
-    @testset "Token names drive colouring" begin
+    @testset "Backend colour hook" begin
+        sim = ModelManagerStudio.studio_backend()
+        ext = Base.get_extension(ModelManagerStudio, :StudioPhysiCellModelManagerExt)
+        @test !isnothing(ext)
+
         N = ModelManagerStudio.token_name
-        #! Colour keys on the NAME, not the tag, so one cell type keeps one colour wherever
-        #! it appears -- as a definition, an adhesion target, a transformation target.
         @test N("cell_definition:name:default") == "default"
         @test N("variable:name:substrate") == "substrate"
         @test N("phenotype") == ""
@@ -184,45 +198,90 @@ createProject()
         #! limit=3 matches retrieveElement, so a name containing a colon survives intact.
         @test N("tag:attr:a:b") == "a:b"
 
-        defs  = ModelManagerStudio.get_next_model("config", "cell_definitions")
-        names = ModelManagerStudio.get_token_names("config", "cell_definitions")
-        @test length(names) == length(defs)
-        @test "default" in names
+        #! PhysiCell's own schema is not coloured -- only names from the user's model are.
+        @test all(isempty, ModelManagerStudio.get_token_colors("config", "overall"))
 
-        #! Structural children carry no name, so they stay uncoloured.
-        @test all(isempty, ModelManagerStudio.get_token_names("config", "overall"))
+        cell_color = ext.CELL_DEFINITION_COLOR
+        substrate_color = ext.SUBSTRATE_COLOR
+        custom_color = ext.CUSTOM_DATA_COLOR
+        #! Three categories, three appearances. If two collapsed, the colour would stop
+        #! distinguishing the thing it exists to distinguish.
+        @test length(unique([cell_color, substrate_color, custom_color])) == 3
 
-        #! The same name reached by a different route must key to the same colour. Adhesion
-        #! affinities are per cell type, so the name recurs under a different tag.
-        aff = ModelManagerStudio.get_token_names("config", "cell_definitions",
-            "cell_definition:name:default", "phenotype", "mechanics", "cell_adhesion_affinities")
+        #! Every cell definition draws the same colour -- as a group, not as instances.
+        defs = ModelManagerStudio.get_next_model("config", "cell_definitions")
+        def_colors = ModelManagerStudio.get_token_colors("config", "cell_definitions")
+        @test length(def_colors) == length(defs)
+        @test !isempty(defs)
+        @test all(==(cell_color), def_colors)
+
+        #! ...including where it appears under a different tag entirely. Adhesion affinities
+        #! are per cell type, so the same names recur deep inside the phenotype.
+        aff_chain = ["cell_definitions", "cell_definition:name:default", "phenotype",
+                     "mechanics", "cell_adhesion_affinities"]
+        aff = ModelManagerStudio.get_next_model("config", aff_chain...)
         if !isempty(aff)
-            @test "default" in aff
+            @test all(==(cell_color), ModelManagerStudio.get_token_colors("config", aff_chain...))
+        end
+
+        #! Substrates are a different group, so a different colour -- and they sit beside
+        #! <options>, which is schema and must stay uncoloured.
+        micro = ModelManagerStudio.get_next_model("config", "microenvironment_setup")
+        micro_colors = ModelManagerStudio.get_token_colors("config", "microenvironment_setup")
+        by_token = Dict(zip(micro, micro_colors))
+        substrate_tokens = [t for t in micro if startswith(t, "variable:")]
+        @test !isempty(substrate_tokens)
+        @test all(t -> by_token[t] == substrate_color, substrate_tokens)
+        @test all(t -> by_token[t] == "", [t for t in micro if !startswith(t, "variable:")])
+
+        #! Custom data has no name to look up -- its children are plain tags -- so the backend
+        #! recognises it by its parent.
+        custom_chain = ["cell_definitions", "cell_definition:name:default", "custom_data"]
+        custom = ModelManagerStudio.get_next_model("config", custom_chain...)
+        custom_colors = ModelManagerStudio.get_token_colors("config", custom_chain...)
+        @test length(custom_colors) == length(custom)
+        if !isempty(custom)
+            @test all(==(custom_color), custom_colors)
+        end
+        #! Only in the config: a "custom_data" element elsewhere is not PhysiCell's custom data.
+        @test isnothing(ModelManagerStudio.studio_token_color(sim, :ic_cell, ["custom_data"], "x"))
+        @test isnothing(ModelManagerStudio.studio_token_color(sim, :config, String[], "anything"))
+
+        #! The generic default colours nothing, so a backend that ignores the hook still works.
+        @test hasmethod(ModelManagerStudio.studio_token_color,
+                        Tuple{MM.AbstractSimulator,Symbol,Vector{String},AbstractString})
+        @test isnothing(invoke(ModelManagerStudio.studio_token_color,
+                               Tuple{MM.AbstractSimulator,Symbol,Vector{String},AbstractString},
+                               sim, :config, String[], "cell_definitions"))
+    end
+
+    @testset "Mixed value lists narrow to a concrete type" begin
+        #! DiscreteVariation wants a concrete Vector{T}. Broadcasting alone joins rather than
+        #! promotes, so [1, 2.0] used to land on the non-concrete Vector{Real}.
+        for (spec, T) in [("[1.0, 2.0]", Float64), ("[1, 2]", Int), ("[1, 2.0]", Float64),
+                          ("[1, true]", Int), ("0.1:0.1:0.3", Float64)]
+            vals = ModelManagerStudio.parse_value_spec(spec)
+            @test vals isa AbstractVector
+            @test isconcretetype(eltype(vals))
+            @test eltype(vals) == T
         end
     end
 
-    @testset "Backend emphasis hook" begin
-        sim = ModelManagerStudio.studio_backend()
+    @testset "Backend colours are sanitized" begin
+        #! Reached from a QML property binding, so a backend returning something QML cannot
+        #! draw has to dull the token rather than break the row it is on.
+        tc(answer) = ModelManagerStudio.token_color(ColorProbe(answer), :config, String[], "t")
 
-        #! Ordinary parameters are not emphasized.
-        @test all(isempty, ModelManagerStudio.get_token_emphases("config", "overall"))
-
-        #! PhysiCell's custom_data children are user-defined rather than schema, which the
-        #! element cannot say -- only the backend knows.
-        chain = ["cell_definitions", "cell_definition:name:default", "custom_data"]
-        custom = ModelManagerStudio.get_next_model("config", chain...)
-        emph = ModelManagerStudio.get_token_emphases("config", chain...)
-        @test length(emph) == length(custom)
-        if !isempty(custom)
-            @test all(==("user-defined"), emph)
-        end
-        @test ModelManagerStudio.studio_token_emphasis(sim, :config, String[], "anything") == ""
-        @test ModelManagerStudio.studio_token_emphasis(sim, :ic_cell, ["custom_data"], "x") == ""
-
-        #! The generic default emphasizes nothing, so a backend that does not implement the
-        #! hook still works.
-        @test hasmethod(ModelManagerStudio.studio_token_emphasis,
-                        Tuple{MM.AbstractSimulator,Symbol,Vector{String},AbstractString})
+        @test tc(nothing) == ""
+        @test tc(missing) == ""
+        @test tc("#A0B0C0") == "#A0B0C0"
+        @test tc("#abc") == "#abc"
+        @test tc("#80A0B0C0") == "#80A0B0C0"
+        @test tc("red") == ""
+        @test tc("#12345") == ""
+        @test tc(42) == ""
+        #! A throwing backend is a dull token, not a stack trace out of a binding.
+        @test tc(:throw) == ""
     end
 
     @testset "Branch and leaf kinds" begin

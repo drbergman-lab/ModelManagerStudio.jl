@@ -1,16 +1,18 @@
 #! The simulator-backend seam.
 #!
 #! Studio depends on ModelManager alone. Everything a backend does differently — how its
-#! projects are laid out on disk, what a reproducible script has to say to reopen one, and how
-#! to tell a user they are not in a project — reaches Studio through the three functions below,
-#! dispatched on `ModelManager.AbstractSimulator`.
+#! projects are laid out on disk, what a reproducible script has to say to reopen one, how to
+#! tell a user they are not in a project, and which tokens its model gives meaning to — reaches
+#! Studio through the functions below, dispatched on `ModelManager.AbstractSimulator`.
 #!
 #! Each has a working generic default, so a backend that implements none of them still drives
-#! the GUI. PhysiCell overrides all three in `ext/StudioPhysiCellModelManagerExt.jl`.
+#! the GUI. PhysiCell overrides all four in `ext/StudioPhysiCellModelManagerExt.jl`.
 #!
-#! The parameter browser is deliberately NOT part of this seam: it reads the location's base
-#! document directly, which works for any backend whose inputs are XML, so there is nothing
-#! per-backend left to dispatch on.
+#! The parameter browser's *structure* is deliberately NOT part of this seam: it reads the
+#! location's base document directly, which works for any backend whose inputs are XML, so
+#! there is nothing per-backend left to dispatch on. Its *reading* is -- which tokens name a
+#! cell definition, a substrate, a user-defined entry -- because that is meaning the document
+#! does not carry.
 
 """
     studio_open_project(sim::ModelManager.AbstractSimulator, args::AbstractString...)
@@ -64,19 +66,26 @@ function studio_no_project_message(::MM.AbstractSimulator)
 end
 
 """
-    studio_token_emphasis(sim, location::Symbol, chain::Vector{String}, token::AbstractString)
+    studio_token_color(sim, location::Symbol, chain::Vector{String}, token::AbstractString)
 
-Whether `token` deserves visual emphasis in the parameter browser, as a short label, or `""`.
+The colour the parameter browser should draw `token` in, as a hex string (`"#RRGGBB"`), or
+`nothing` when the backend has nothing to say about it.
 
-The generic default emphasizes nothing: the browser reads the document, and a document cannot
-say which of its elements are interesting. A backend knows things the XML does not — PhysiCell's
-`custom_data` children are user-defined rather than part of the schema, which is worth marking
-and is not inferable from the element itself.
+The generic default colours nothing: the browser reads the document, and a document cannot say
+which of its elements belong to a category a reader cares about. A backend knows what the XML
+does not -- PhysiCell can tell that a token names a cell definition, a substrate, or a
+user-defined custom-data entry, none of which is inferable from the element itself.
 
-Returned labels are backend-defined; the GUI styles anything non-empty and shows the label in a
-tooltip, so a backend can introduce one without a change here.
+The point of a colour here is that it is shared: every cell definition name draws the same,
+every substrate name draws another, wherever in the tree they turn up. That is a statement about
+*categories*, which only the backend can make -- keying on the token's own name instead gave
+every instance its own colour, which says nothing a reader did not already see in the text.
+
+`missing` is accepted as a synonym for `nothing`. Anything that is not a `#RGB`, `#RRGGBB` or
+`#AARRGGBB` string is treated as no colour, with a debug message, so a malformed return is a dull
+token rather than a broken binding in the GUI.
 """
-studio_token_emphasis(::MM.AbstractSimulator, ::Symbol, ::Vector{String}, ::AbstractString) = ""
+studio_token_color(::MM.AbstractSimulator, ::Symbol, ::Vector{String}, ::AbstractString) = nothing
 
 """
     studio_backend()

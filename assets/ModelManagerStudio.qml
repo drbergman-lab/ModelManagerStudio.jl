@@ -19,31 +19,14 @@ ApplicationWindow {
     property color unusedTint: "#e6e8ea"
     property color unusedTextColor: "#8a8f98"
 
-    // Colour for attribute-disambiguated tokens, so every cell definition shares one colour
-    // and every substrate another. Assigned per tag on first sight and remembered, so a tag
-    // keeps its colour across levels and reopens within a session.
+    // Default colour for a token the backend says nothing about: PhysiCell's own schema,
+    // which is most of the document. The backend supplies a hex for the rest, one colour per
+    // category of name it recognises (cell definitions, substrates, custom data), so a
+    // category reads the same wherever in the tree it turns up.
     //
-    // This replaces a hardcoded substrate/cell-type/custom-data test that needed the
-    // PhysiCell vocabulary. Keying on the tag is generic: it colours every kind of named
-    // instance any backend produces, not three known ones.
-    property var tagPalette: ["#206020", "#2060A0", "#8C5A14", "#6A3D9A", "#0F7F7F", "#A02020"]
-    property color emphasisColor: "#A02020"
-    property var tagColors: ({})
-    property int tagColorCursor: 0
-
-    // Keyed on the instance NAME, not its tag, so "tumor" keeps one colour wherever it turns
-    // up -- as a cell definition, an adhesion target, a transformation target -- which is the
-    // only thing that makes the colour worth reading.
-    function colorForName(name) {
-        if (!name || name === "")
-            return "#000000";
-
-        if (tagColors[name] === undefined) {
-            tagColors[name] = tagPalette[tagColorCursor % tagPalette.length];
-            tagColorCursor = tagColorCursor + 1;
-        }
-        return tagColors[name];
-    }
+    // Studio assigns none of these itself. It has the XML, and the XML does not know which of
+    // its elements a modeller thinks of as a group.
+    property color defaultTokenColor: "#000000"
 
     // Breathing room added to a ComboBox on top of its own padding and indicator width.
     // The token chain measures its widest entry with a hidden Text and sizes to that, but a
@@ -704,10 +687,9 @@ ApplicationWindow {
                                                 id: tokenComboBox
 
                                                 property int longestTextWidth: 0
-                                                // Branch/leaf and tag per entry, index-parallel to `model`.
+                                                // Branch/leaf and colour per entry, index-parallel to `model`.
                                                 property var itemKinds: []
-                                                property var itemNames: []
-                                                property var itemEmphases: []
+                                                property var itemColors: []
 
                                                 // Search-within-a-level. The walk produces honest but deep
                                                 // paths, so a level can hold many siblings; typing narrows
@@ -742,8 +724,7 @@ ApplicationWindow {
                                                         toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
                                                     }
                                                     itemKinds = Julia.get_token_kinds.apply(Julia, toks);
-                                                    itemNames = Julia.get_token_names.apply(Julia, toks);
-                                                    itemEmphases = Julia.get_token_emphases.apply(Julia, toks);
+                                                    itemColors = Julia.get_token_colors.apply(Julia, toks);
                                                 }
 
                                                 function updateLongestTextWidth() {
@@ -784,8 +765,8 @@ ApplicationWindow {
 
                                                     property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
                                                     property bool matches: tokenComboBox.matchesFilter(modelData)
-                                                    property string tokenName: index < tokenComboBox.itemNames.length ? tokenComboBox.itemNames[index] : ""
-                                                    property string emphasis: index < tokenComboBox.itemEmphases.length ? tokenComboBox.itemEmphases[index] : ""
+                                                    // "" means the backend claimed nothing for this token.
+                                                    property string tokenColor: index < tokenComboBox.itemColors.length ? tokenComboBox.itemColors[index] : ""
 
                                                     width: ListView.view ? ListView.view.width : implicitWidth
                                                     visible: matches
@@ -800,16 +781,12 @@ ApplicationWindow {
                                                         Text {
                                                             width: parent.width - (tokenItem.opensMenu ? 18 : 0)
                                                             text: modelData
-                                                            color: tokenItem.emphasis !== "" ? mainWindow.emphasisColor
-                                                                 : mainWindow.colorForName(tokenItem.tokenName)
-                                                            // Bold marks a named instance from the model
-                                                            // (a cell definition, a substrate) as opposed to
-                                                            // a structural tag; italic marks whatever the
-                                                            // backend flagged. Neither rests on colour alone.
-                                                            font.bold: tokenItem.tokenName !== ""
-                                                            font.italic: tokenItem.emphasis !== ""
-                                                            ToolTip.visible: tokenItem.hovered && tokenItem.emphasis !== ""
-                                                            ToolTip.text: tokenItem.emphasis
+                                                            color: tokenItem.tokenColor !== "" ? tokenItem.tokenColor
+                                                                 : mainWindow.defaultTokenColor
+                                                            // Bold carries the same distinction as the colour,
+                                                            // so a reader who cannot separate the hues still
+                                                            // sees which rows name something in the model.
+                                                            font.bold: tokenItem.tokenColor !== ""
                                                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
                                                             elide: Text.ElideRight
                                                             verticalAlignment: Text.AlignVCenter
@@ -893,8 +870,7 @@ ApplicationWindow {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
                                                         itemKinds = [];
-                                                        itemNames = [];
-                                                        itemEmphases = [];
+                                                        itemColors = [];
                                                         return ;
                                                     }
                                                     updateLongestTextWidth();
@@ -1046,15 +1022,17 @@ ApplicationWindow {
                                         id: variationValuesInput
 
                                         // Why the variation cannot be created right now; "" when it can.
-                                        // Recomputed on every keystroke so the button's disabled state always
-                                        // has a stated reason, instead of a click that silently does nothing.
-                                        property string blocker: ""
-
-                                        function refreshBlocker() {
-                                            blocker = Julia.variation_blocker(currentVariationTargetText.text, text);
-                                        }
-
-                                        onTextChanged: refreshBlocker()
+                                        // So the button's disabled state always has a stated reason, instead
+                                        // of a click that silently does nothing.
+                                        //
+                                        // A binding, not a hand-rolled refresh on `onTextChanged`: that
+                                        // version missed both ends. It never ran before the first keystroke,
+                                        // so the button sat enabled with no target chosen, and it never ran
+                                        // when the TARGET changed, so finishing a parameter chain left the
+                                        // stale "Finish choosing a parameter." in place until the user typed
+                                        // again. The binding re-evaluates on either input, including at
+                                        // creation.
+                                        property string blocker: Julia.variation_blocker(currentVariationTargetText.text, text)
 
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter

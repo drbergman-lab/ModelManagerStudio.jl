@@ -267,17 +267,22 @@ function _collect_elements(args, text::AbstractString)
         v isa Distribution && throw(ValueSpecError("A list cannot contain a distribution — give either a list of values or a single distribution."))
         push!(vals, v)
     end
-    #! Narrow the element type so DiscreteVariation gets a concrete Vector{T}. A mixed list
-    #! (e.g. [1, true]) promotes to a common type via `identity.(...)`, which is what the
-    #! variation database would store anyway.
-    return identity.(vals)
+    #! Narrow the element type so DiscreteVariation gets a concrete Vector{T}. Broadcasting
+    #! over the Any[] does most of it -- Any[1.0, 2.0] comes back Vector{Float64} -- but it
+    #! joins rather than promotes, so a mixed list (e.g. [1, 2.0]) lands on the non-concrete
+    #! Vector{Real}. Promote those the rest of the way, which is what the variation database
+    #! would store anyway. The empty case cannot reach here; it threw above.
+    narrowed = identity.(vals)
+    isconcretetype(eltype(narrowed)) && return narrowed
+    T = promote_type(map(typeof, vals)...)
+    return isconcretetype(T) ? convert(Vector{T}, narrowed) : narrowed
 end
 
 """
     _unknown_distribution_message(name::Symbol)
 
 Explain that `name` is not usable, suggesting near matches by name rather than listing all
-$(length(ALLOWED_DISTRIBUTIONS) > 0 ? "" : "")available distributions — there are dozens, and a wall of them is not a useful error.
+available distributions — there are dozens, and a wall of them is not a useful error.
 """
 function _unknown_distribution_message(name::Symbol)
     n = String(name)

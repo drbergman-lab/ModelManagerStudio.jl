@@ -20,7 +20,7 @@ using ModelManager
 
 #! Imported by the backend extensions, which add methods to these.
 @compat public studio_open_project, studio_transcript_preamble, studio_no_project_message,
-               studio_token_emphasis, studio_project_is_open
+               studio_token_color, studio_project_is_open, token_name
 
 #! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
 #! backwards: `main` (which a user never calls interactively) was exported while `launch`
@@ -93,7 +93,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     #! Every name here must exist; `@qmlfunction` on a deleted one is an UndefVarError at
     #! launch, from inside the macro, which is how the removed vocabulary helpers showed up.
     @qmlfunction get_folders set_input_folders get_input_folder get_varied_locations
-    @qmlfunction get_next_model get_token_kinds get_token_names get_token_emphases get_target_path is_resolvable_target
+    @qmlfunction get_next_model get_token_kinds get_token_colors get_target_path is_resolvable_target
     @qmlfunction create_variation get_current_variations variation_exists
     @qmlfunction delete_variation clear_variations
     @qmlfunction value_spec_error variation_blocker allowed_distribution_names
@@ -253,9 +253,9 @@ end
 
 The *name* an attribute-disambiguated token carries, or `""` for a plain structural tag.
 
-`"cell_definition:name:tumor"` yields `"tumor"`. The GUI colours by this rather than by the
-tag, so a given cell type keeps one colour everywhere it appears — as a definition, as an
-adhesion target, as a transformation target — which is what makes the colour worth reading.
+`"cell_definition:name:tumor"` yields `"tumor"`. Provided for backends writing a
+[`studio_token_color`](@ref) method: deciding that a token names one of the model's cell
+definitions means comparing that name against the ones the model declares.
 
 Split with `limit=3` to match `retrieveElement`, so a name containing a colon survives intact.
 """
@@ -264,33 +264,54 @@ function token_name(token::AbstractString)
     return length(parts) == 3 ? String(parts[3]) : ""
 end
 
-"""
-    get_token_names(tokens::Vararg{AbstractString})
+#! A colour the browser can actually draw. Anything else from a backend is dropped rather than
+#! handed to QML, where an unparseable `color:` is a binding warning and an invisible token.
+const HEX_COLOR = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
 
-Instance name per entry, parallel to [`get_next_model`](@ref); `""` where the token is a plain
-tag. Called from QML, which maps a name to a colour.
 """
-function get_token_names(tokens::Vararg{AbstractString})
+    get_token_colors(tokens::Vararg{AbstractString})
+
+Hex colour per entry, parallel to [`get_next_model`](@ref); `""` where the backend gave none, in
+which case the GUI uses its own default. Called from QML.
+
+The colour is the backend's statement that an entry belongs to a category of its model -- a cell
+definition, a substrate -- so that the category reads the same everywhere it appears. Studio
+itself assigns no colours: it has only the document, which does not know its own categories.
+"""
+function get_token_colors(tokens::Vararg{AbstractString})
     toks = [String.(tokens)...]
     location = popfirst!(toks)
-    return token_name.(get_next_model(String(location), toks...))
+    candidates = get_next_model(String(location), toks...)
+    sim = studio_backend()
+    isnothing(sim) && return fill("", length(candidates))
+    chain = [t for t in toks if !isempty(t)]
+    return [token_color(sim, Symbol(location), chain, t) for t in candidates]
 end
 
 """
-    get_token_emphases(tokens::Vararg{AbstractString})
+    token_color(sim, location, chain, token)
 
-Emphasis per entry, parallel to [`get_next_model`](@ref). `""` for ordinary tokens; anything
-else is a backend saying this entry deserves to stand out — see
-[`studio_token_emphasis`](@ref). Called from QML.
+[`studio_token_color`](@ref) reduced to a hex string or `""`.
+
+Never throws and never returns something QML cannot draw: this is reached from a property
+binding, where a backend's bad return value would otherwise surface as a Qt warning on a token
+the user is looking at.
 """
-function get_token_emphases(tokens::Vararg{AbstractString})
-    toks = [String.(tokens)...]
-    location = popfirst!(toks)
-    sim = studio_backend()
-    candidates = get_next_model(String(location), toks...)
-    isnothing(sim) && return fill("", length(candidates))
-    chain = [t for t in toks if !isempty(t)]
-    return [studio_token_emphasis(sim, Symbol(location), chain, t) for t in candidates]
+function token_color(sim, location::Symbol, chain::Vector{String}, token::AbstractString)
+    raw = try
+        studio_token_color(sim, location, chain, token)
+    catch e
+        model_manager_studio_debug("studio_token_color failed for $(token): $(sprint(showerror, e))")
+        return ""
+    end
+    (isnothing(raw) || ismissing(raw)) && return ""
+    raw isa AbstractString || return ""
+    hex = String(raw)
+    if !occursin(HEX_COLOR, hex)
+        model_manager_studio_debug("studio_token_color returned $(repr(hex)) for $(token), which is not a hex colour.")
+        return ""
+    end
+    return hex
 end
 
 """

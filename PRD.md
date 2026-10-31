@@ -61,12 +61,13 @@ Three commitments shape every feature:
 ## Feature: Simulator backend seam — **implemented**
 
 **Behavior.** Studio depends on ModelManager alone. A backend reaches it through a package
-extension that adds methods to three functions, dispatched on `ModelManager.AbstractSimulator`:
+extension that adds methods to four functions, dispatched on `ModelManager.AbstractSimulator`:
 
 ```julia
-studio_open_project(sim, args...)      -> Bool     # where projects live on disk
-studio_transcript_preamble(sim)        -> String   # how the recorded script reopens one
-studio_no_project_message(sim)         -> String   # how to point a lost user at createProject
+studio_open_project(sim, args...)      -> Bool                   # where projects live on disk
+studio_transcript_preamble(sim)        -> String                 # how the recorded script reopens one
+studio_no_project_message(sim)         -> String                 # how to point a lost user at createProject
+studio_token_color(sim, loc, chain, t) -> Union{String,Nothing}  # which tokens name something in the model
 ```
 
 **Acceptance criteria.**
@@ -74,8 +75,19 @@ studio_no_project_message(sim)         -> String   # how to point a lost user at
 - Studio loads and precompiles with **no** simulator package present.
 - With no backend registered, `launch` explains that rather than raising an `AssertionError`
   from `mm_globals()`.
-- The parameter browser is deliberately *not* in this seam: it reads the base document, which
-  is the same operation for any backend whose inputs are XML.
+- The parameter browser's *structure* is deliberately *not* in this seam: it reads the base
+  document, which is the same operation for any backend whose inputs are XML. Its *reading* is,
+  because the document does not carry that meaning.
+- `studio_token_color` returns one colour per **category** of name, not per name. PhysiCell
+  returns one for cell definitions, one for substrates, one for `custom_data` children, and
+  `nothing` for its own schema — so a category reads the same wherever in the tree it appears.
+  Colouring each instance separately only restates the word already on the row.
+- The first two categories are decided by looking a token's name up in the config's own
+  declarations, never by listing the tags a name can appear under: PhysiCell adds such tags
+  (`attack_rate`, `fuse_rate`, `chemotactic_sensitivity`, ...) with every release, and a list
+  here would go stale silently.
+- A return that is not a hex colour, and a hook that throws, both reduce to "no colour". This is
+  reached from a QML property binding, where neither can be allowed to surface.
 
 **Why the preamble is dispatched.** A backend's project is not always reopenable from its data
 directory alone — PhysiCell pairs a `PhysiCell/` tree with a `data/` tree, and both must appear
