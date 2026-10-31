@@ -947,7 +947,7 @@ ApplicationWindow {
                                         font.pixelSize: mainWindow.fontSizeOfLevel[3]
                                         width: implicitWidth
                                         onTextChanged: {
-                                            createVariationButton.text = Julia.variation_exists(currentVariationTargetText.text) ? "Edit Variation" : "Create Variation";
+                                            createVariationButton.refreshLabel();
                                             variationValuesInput.refreshBlocker();
                                         }
                                     }
@@ -1057,6 +1057,13 @@ ApplicationWindow {
                         Button {
                             id: createVariationButton
 
+                            // Whether this target already has a variation decides the label.
+                            // Removing one has to re-ask, or the button keeps saying "Edit"
+                            // for a variation that no longer exists.
+                            function refreshLabel() {
+                                text = Julia.variation_exists(currentVariationTargetText.text) ? "Edit Variation" : "Create Variation";
+                            }
+
                             Layout.preferredWidth: 150
                             Layout.preferredHeight: 40
                             text: "Create Variation"
@@ -1108,13 +1115,31 @@ ApplicationWindow {
                     ColumnLayout {
                         id: currentVariationsColumn
 
-                        Text {
-                            text: "Current variations"
-                            color: syscolors.text
-                            font.bold: true
-                            font.pixelSize: mainWindow.fontSizeOfLevel[1]
-                            Layout.alignment: Qt.AlignLeft
-                            Layout.leftMargin: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "Current variations"
+                                color: syscolors.text
+                                font.bold: true
+                                font.pixelSize: mainWindow.fontSizeOfLevel[1]
+                                Layout.alignment: Qt.AlignLeft
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                text: "Clear all"
+                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                enabled: currentVariationsFlickable.currentVariations.length > 0
+                                onClicked: {
+                                    Julia.clear_variations();
+                                    currentVariationsFlickable.currentVariations = Julia.get_current_variations();
+                                    createVariationButton.refreshLabel();
+                                }
+                            }
                         }
 
                         // Current variations rectangle
@@ -1174,6 +1199,22 @@ ApplicationWindow {
                                                     font.pixelSize: mainWindow.fontSizeOfLevel[3]
                                                     Layout.fillWidth: true
                                                     wrapMode: Text.Wrap
+                                                }
+
+                                                // Until this existed the pending design could only
+                                                // grow: a mistaken variation meant restarting the app.
+                                                // Julia indices are 1-based; QML's `index` is 0-based.
+                                                Button {
+                                                    text: "\u2715"
+                                                    font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                    implicitWidth: 28
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    Accessible.name: "Remove variation " + modelData[0].toString()
+                                                    onClicked: {
+                                                        Julia.delete_variation(index + 1);
+                                                        currentVariationsFlickable.currentVariations = Julia.get_current_variations();
+                                                        createVariationButton.refreshLabel();
+                                                    }
                                                 }
 
                                             }
