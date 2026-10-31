@@ -273,6 +273,26 @@ createProject()
         @test !(:PhysiCellModelManager in names(ModelManagerStudio; all=true, imported=true))
     end
 
+    @testset "Transcript preamble actually reopens the project" begin
+        #! The preamble is the one seam function whose failure is silent and late: a wrong one
+        #! still writes a transcript, and you find out when someone runs the script. So execute
+        #! it rather than pattern-matching it. Evaluated in a throwaway module; it reopens the
+        #! same project, so the suite's state is unchanged.
+        pre = ModelManagerStudio.studio_transcript_preamble(ModelManagerStudio.studio_backend())
+        sandbox = Module(:PreambleCheck)
+        Core.eval(sandbox, :(using Test))
+        @test try
+            include_string(sandbox, pre)
+            true
+        catch e
+            @info "preamble failed to run" exception = (e, catch_backtrace())
+            false
+        end
+        #! And it must leave a project open, not merely run without error.
+        @test ModelManagerStudio.studio_project_is_open()
+        @test MM.dataDir() == dirname(MM.centralDB().file)
+    end
+
     @testset "Documented API is reachable" begin
         #! The README tells users to write `using ModelManagerStudio; launch()`. That only
         #! works if `launch` is exported -- it was `@compat public`, which is not the same

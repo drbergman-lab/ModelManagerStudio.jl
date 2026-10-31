@@ -681,6 +681,31 @@ ApplicationWindow {
                                                 // Branch/leaf per entry, index-parallel to `model`.
                                                 property var itemKinds: []
 
+                                                // Search-within-a-level. The walk produces honest but deep
+                                                // paths, so a level can hold many siblings; typing narrows
+                                                // them. Filtering hides delegates rather than replacing
+                                                // `model`, deliberately: mutating the model would reset
+                                                // currentIndex on every keystroke and re-fire the cascade
+                                                // that rebuilds every ComboBox to the right.
+                                                property string filterText: ""
+
+                                                function matchesFilter(token) {
+                                                    if (filterText === "")
+                                                        return true;
+
+                                                    return token.toString().toLowerCase().indexOf(filterText.toLowerCase()) !== -1;
+                                                }
+
+                                                function visibleCount() {
+                                                    if (model === undefined)
+                                                        return 0;
+
+                                                    let n = 0;
+                                                    for (let i = 0; i < model.length; ++i) if (matchesFilter(model[i]))
+                                                        ++n;
+                                                    return n;
+                                                }
+
                                                 // The chain UP TO this ComboBox is what produced its model, so
                                                 // the same chain yields this level's headings and kinds.
                                                 function refreshMeta() {
@@ -728,8 +753,14 @@ ApplicationWindow {
                                                     id: tokenItem
 
                                                     property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
+                                                    property bool matches: tokenComboBox.matchesFilter(modelData)
 
                                                     width: ListView.view ? ListView.view.width : implicitWidth
+                                                    visible: matches
+                                                    // Collapse rather than just hide, or the popup keeps the
+                                                    // full-length gap where filtered-out rows used to be.
+                                                    height: matches ? implicitHeight : 0
+                                                    enabled: matches
 
                                                     contentItem: Row {
                                                         spacing: 8
@@ -754,7 +785,70 @@ ApplicationWindow {
                                                         }
                                                     }
                                                 }
+                                                popup: Popup {
+                                                    y: tokenComboBox.height
+                                                    width: Math.max(tokenComboBox.width, 240)
+                                                    padding: 1
+
+                                                    // Reset on every open: a filter left over from last time
+                                                    // would silently hide most of a fresh level.
+                                                    onOpened: {
+                                                        filterField.text = "";
+                                                        filterField.forceActiveFocus();
+                                                    }
+                                                    onClosed: tokenComboBox.filterText = ""
+
+                                                    contentItem: ColumnLayout {
+                                                        spacing: 0
+
+                                                        TextField {
+                                                            id: filterField
+
+                                                            Layout.fillWidth: true
+                                                            placeholderText: "Type to filter\u2026"
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[3]
+                                                            selectByMouse: true
+                                                            onTextChanged: tokenComboBox.filterText = text
+                                                            // Enter picks the only remaining match, so a
+                                                            // narrowing search needs no mouse.
+                                                            Keys.onReturnPressed: {
+                                                                if (tokenComboBox.visibleCount() !== 1)
+                                                                    return ;
+
+                                                                for (let i = 0; i < tokenComboBox.model.length; ++i) {
+                                                                    if (tokenComboBox.matchesFilter(tokenComboBox.model[i])) {
+                                                                        tokenComboBox.currentIndex = i;
+                                                                        tokenComboBox.popup.close();
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            Layout.margins: 6
+                                                            visible: tokenComboBox.visibleCount() === 0
+                                                            text: "No match"
+                                                            color: mainWindow.unusedTextColor
+                                                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                            font.italic: true
+                                                        }
+
+                                                        ListView {
+                                                            Layout.fillWidth: true
+                                                            Layout.preferredHeight: Math.min(contentHeight, 320)
+                                                            clip: true
+                                                            model: tokenComboBox.delegateModel
+                                                            currentIndex: tokenComboBox.highlightedIndex
+
+                                                            ScrollIndicator.vertical: ScrollIndicator {
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                                 onModelChanged: {
+                                                    filterText = "";
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
                                                         itemKinds = [];

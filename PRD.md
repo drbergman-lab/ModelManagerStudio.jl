@@ -77,12 +77,23 @@ studio_no_project_message(sim)         -> String   # how to point a lost user at
 - The parameter browser is deliberately *not* in this seam: it reads the base document, which
   is the same operation for any backend whose inputs are XML.
 
+**Why the preamble is dispatched.** A backend's project is not always reopenable from its data
+directory alone — PhysiCell pairs a `PhysiCell/` tree with a `data/` tree, and both must appear
+in the script. That is exactly what `::AbstractSimulator` dispatch is for, and the PhysiCell
+extension supplies its own method. Nothing is being worked around.
+
+**The property that needs guarding** is not the dispatch but the *failure mode*: a missing or
+wrong preamble still produces a transcript, and nothing notices until someone runs the script.
+Contrast `studio_open_project`, where a missing override fails loudly at launch. So the preamble
+is **executed by the test suite**, not pattern-matched — `include_string` into a throwaway module,
+then assert a project is open. Any backend whose preamble does not reopen its own project fails
+there rather than in a user's hands.
+
 **Edge cases.**
-- **`studio_transcript_preamble` cannot be generic for every backend.** A PhysiCell project is
-  not reopenable from its data directory alone, so the generic one-argument form would emit a
-  script that does not run. This is the function most likely to be forgotten by a new backend.
-- **Registration order.** A backend registers its simulator in its own `__init__`, so it must
-  be loaded before `launch` is called, not necessarily before Studio.
+- **Registration order.** A backend registers its simulator in its own `__init__`, so it must be
+  loaded before `launch` is called — not necessarily before Studio.
+- **The preamble is written at `initialize_record` time**, so it captures the project as opened.
+  A backend whose project identity can change mid-session would need to re-emit it.
 
 ---
 
@@ -116,10 +127,14 @@ maintain and cannot disagree with itself.
   grammar under the cascade and returned `nothing`.
 - Base documents are cached per location and freed when the input folders change.
 
-**Cost accepted.** Paths are longer: `speed` is now
+**Cost accepted, and mitigated.** Paths are longer: `speed` is now
 `cell_definitions/cell_definition:name:default/phenotype/motility/speed` rather than
-`default > speed`. Search or filtering within a level is the mitigation if that becomes
-annoying — not a return to curation.
+`default > speed`. The mitigation is **search within a level** — each dropdown opens with a
+filter field, and typing narrows the siblings — not a return to curation.
+
+Filtering hides delegates rather than replacing `model`. Mutating the model would reset
+`currentIndex` on every keystroke and re-fire the cascade that rebuilds every ComboBox to the
+right of this one, so the chain would churn as the user types.
 
 **Edge cases.**
 - **Ambiguous siblings.** When no attribute uniquely identifies siblings, the walker emits
