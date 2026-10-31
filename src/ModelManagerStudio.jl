@@ -20,7 +20,7 @@ using ModelManager
 
 #! Imported by the backend extensions, which add methods to these.
 @compat public studio_open_project, studio_transcript_preamble, studio_no_project_message,
-               studio_project_is_open
+               studio_token_emphasis, studio_project_is_open
 
 #! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
 #! backwards: `main` (which a user never calls interactively) was exported while `launch`
@@ -93,7 +93,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     #! Every name here must exist; `@qmlfunction` on a deleted one is an UndefVarError at
     #! launch, from inside the macro, which is how the removed vocabulary helpers showed up.
     @qmlfunction get_folders set_input_folders get_input_folder get_varied_locations
-    @qmlfunction get_next_model get_token_kinds get_token_tags get_target_path is_resolvable_target
+    @qmlfunction get_next_model get_token_kinds get_token_names get_token_emphases get_target_path is_resolvable_target
     @qmlfunction create_variation get_current_variations variation_exists
     @qmlfunction delete_variation clear_variations
     @qmlfunction value_spec_error variation_blocker allowed_distribution_names
@@ -249,32 +249,48 @@ function _element_at(location::AbstractString, chain::Vector{String})
 end
 
 """
-    token_tag(token)
+    token_name(token)
 
-The tag of an attribute-disambiguated token, or `""` for a plain structural tag.
+The *name* an attribute-disambiguated token carries, or `""` for a plain structural tag.
 
-`"cell_definition:name:default"` yields `"cell_definition"`; `"phenotype"` yields `""`. The GUI
-colours by this, so every instance of a kind shares a colour — cell definitions one, substrates
-another — without anything knowing what a cell definition is. Under the curated cascade this
-needed `get_cell_type_names()` and `get_substrate_names()`, i.e. the PhysiCell vocabulary; the
-walk makes the token say it itself.
+`"cell_definition:name:tumor"` yields `"tumor"`. The GUI colours by this rather than by the
+tag, so a given cell type keeps one colour everywhere it appears — as a definition, as an
+adhesion target, as a transformation target — which is what makes the colour worth reading.
+
+Split with `limit=3` to match `retrieveElement`, so a name containing a colon survives intact.
 """
-function token_tag(token::AbstractString)
-    t = String(token)
-    i = findfirst(==(':'), t)
-    return isnothing(i) ? "" : t[1:i-1]
+function token_name(token::AbstractString)
+    parts = split(String(token), ':'; limit=3)
+    return length(parts) == 3 ? String(parts[3]) : ""
 end
 
 """
-    get_token_tags(tokens::Vararg{AbstractString})
+    get_token_names(tokens::Vararg{AbstractString})
 
-Tag per entry, parallel to [`get_next_model`](@ref); `""` where the token is a plain tag.
-Called from QML, which maps a tag to a colour.
+Instance name per entry, parallel to [`get_next_model`](@ref); `""` where the token is a plain
+tag. Called from QML, which maps a name to a colour.
 """
-function get_token_tags(tokens::Vararg{AbstractString})
+function get_token_names(tokens::Vararg{AbstractString})
     toks = [String.(tokens)...]
     location = popfirst!(toks)
-    return token_tag.(get_next_model(String(location), toks...))
+    return token_name.(get_next_model(String(location), toks...))
+end
+
+"""
+    get_token_emphases(tokens::Vararg{AbstractString})
+
+Emphasis per entry, parallel to [`get_next_model`](@ref). `""` for ordinary tokens; anything
+else is a backend saying this entry deserves to stand out — see
+[`studio_token_emphasis`](@ref). Called from QML.
+"""
+function get_token_emphases(tokens::Vararg{AbstractString})
+    toks = [String.(tokens)...]
+    location = popfirst!(toks)
+    sim = studio_backend()
+    candidates = get_next_model(String(location), toks...)
+    isnothing(sim) && return fill("", length(candidates))
+    chain = [t for t in toks if !isempty(t)]
+    return [studio_token_emphasis(sim, Symbol(location), chain, t) for t in candidates]
 end
 
 """

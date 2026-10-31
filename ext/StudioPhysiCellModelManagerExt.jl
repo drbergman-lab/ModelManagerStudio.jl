@@ -73,4 +73,19 @@ function MMS.studio_no_project_message(::PhysiCellSimulator)
     """
 end
 
+"""
+    studio_token_emphasis(::PhysiCellSimulator, location, chain, token)
+
+Mark PhysiCell's user-defined parameters.
+
+Children of `<custom_data>` are whatever the modeller added to their own cell definition, not
+part of PhysiCell's schema. That is worth distinguishing in the browser and is not inferable
+from the element — it looks like any other leaf — so it has to come from the backend.
+"""
+function MMS.studio_token_emphasis(::PhysiCellSimulator, location::Symbol,
+                                   chain::Vector{String}, ::AbstractString)
+    location === :config || return ""
+    return isempty(chain) || last(chain) != "custom_data" ? "" : "user-defined"
+end
+
 end # module

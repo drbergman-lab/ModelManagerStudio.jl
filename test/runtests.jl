@@ -173,29 +173,56 @@ createProject()
         @test deep == "cell_definitions/cell_definition:name:default/phenotype/motility/speed"
     end
 
-    @testset "Token tags drive colouring" begin
-        T = ModelManagerStudio.token_tag
-        @test T("cell_definition:name:default") == "cell_definition"
-        @test T("variable:name:substrate") == "variable"
-        @test T("phenotype") == ""
-        @test T("") == ""
+    @testset "Token names drive colouring" begin
+        N = ModelManagerStudio.token_name
+        #! Colour keys on the NAME, not the tag, so one cell type keeps one colour wherever
+        #! it appears -- as a definition, an adhesion target, a transformation target.
+        @test N("cell_definition:name:default") == "default"
+        @test N("variable:name:substrate") == "substrate"
+        @test N("phenotype") == ""
+        @test N("") == ""
+        #! limit=3 matches retrieveElement, so a name containing a colon survives intact.
+        @test N("tag:attr:a:b") == "a:b"
 
-        #! Parallel to the model, like kinds, since QML indexes all three together.
         defs  = ModelManagerStudio.get_next_model("config", "cell_definitions")
-        tags  = ModelManagerStudio.get_token_tags("config", "cell_definitions")
-        @test length(tags) == length(defs)
-        @test all(==( "cell_definition"), tags)
+        names = ModelManagerStudio.get_token_names("config", "cell_definitions")
+        @test length(names) == length(defs)
+        @test "default" in names
 
-        #! Structural children carry no tag, so they stay uncoloured.
-        inner = ModelManagerStudio.get_next_model("config", "overall")
-        @test all(isempty, ModelManagerStudio.get_token_tags("config", "overall"))
-        @test !isempty(inner)
+        #! Structural children carry no name, so they stay uncoloured.
+        @test all(isempty, ModelManagerStudio.get_token_names("config", "overall"))
 
-        #! Substrates are a different tag from cell definitions, so they get a different
-        #! colour without anything knowing what a substrate is.
-        subs = ModelManagerStudio.get_token_tags("config", "microenvironment_setup")
-        @test "variable" in subs
-        @test !("cell_definition" in subs)
+        #! The same name reached by a different route must key to the same colour. Adhesion
+        #! affinities are per cell type, so the name recurs under a different tag.
+        aff = ModelManagerStudio.get_token_names("config", "cell_definitions",
+            "cell_definition:name:default", "phenotype", "mechanics", "cell_adhesion_affinities")
+        if !isempty(aff)
+            @test "default" in aff
+        end
+    end
+
+    @testset "Backend emphasis hook" begin
+        sim = ModelManagerStudio.studio_backend()
+
+        #! Ordinary parameters are not emphasized.
+        @test all(isempty, ModelManagerStudio.get_token_emphases("config", "overall"))
+
+        #! PhysiCell's custom_data children are user-defined rather than schema, which the
+        #! element cannot say -- only the backend knows.
+        chain = ["cell_definitions", "cell_definition:name:default", "custom_data"]
+        custom = ModelManagerStudio.get_next_model("config", chain...)
+        emph = ModelManagerStudio.get_token_emphases("config", chain...)
+        @test length(emph) == length(custom)
+        if !isempty(custom)
+            @test all(==("user-defined"), emph)
+        end
+        @test ModelManagerStudio.studio_token_emphasis(sim, :config, String[], "anything") == ""
+        @test ModelManagerStudio.studio_token_emphasis(sim, :ic_cell, ["custom_data"], "x") == ""
+
+        #! The generic default emphasizes nothing, so a backend that does not implement the
+        #! hook still works.
+        @test hasmethod(ModelManagerStudio.studio_token_emphasis,
+                        Tuple{MM.AbstractSimulator,Symbol,Vector{String},AbstractString})
     end
 
     @testset "Branch and leaf kinds" begin

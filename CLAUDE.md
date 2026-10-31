@@ -7,11 +7,10 @@ Assistant professor working on computational modeling of cancer-immune interacti
 
 | Document | Purpose |
 |----------|---------|
-| [README.md](README.md) | Project overview + **Implementation Status** (what is built, what remains) |
+| [README.md](README.md) | Project overview and roadmap |
 | [PRD.md](PRD.md) | Behavioral specification for every feature — acceptance criteria and edge cases |
-| [progress.md](progress.md) | Session journal: decisions made, approaches rejected, open questions |
 
-Start any feature session by reading the relevant PRD entry and the Implementation Status section of `README.md`.
+Start any feature session by reading the relevant PRD entry.
 
 ## Project Overview
 ModelManagerStudio is a QML.jl/Qt desktop GUI over ModelManager. It exists to remove one specific friction: setting up a simulation campaign requires naming parameters by their XML path, which is tedious to look up and easy to get wrong. The GUI lets the user *walk* to a parameter through the model's own structure instead.
@@ -22,7 +21,7 @@ Three things it does, in order of importance:
 2. **Record a replayable transcript** — every action is written to `mms_records/<timestamp>.jl` as ordinary ModelManager code. This is the anti-lock-in guarantee: the GUI writes scripts, it does not replace them.
 3. **Launch and monitor campaigns** — runs, sweeps, sensitivity analyses, calibrations.
 
-**Status: mid-migration.** The GUI works for the simple case (pick folders → browse → vary → run) but is hardwired to PhysiCell, blocks its own UI during a run, and has no error surface. See [README.md](README.md) Implementation Status.
+**Status.** The core is framework-agnostic: it depends on ModelManager alone, and PhysiCell arrives through `ext/StudioPhysiCellModelManagerExt.jl`. The GUI completes the pick-folders → browse → vary → run workflow. It still blocks the UI thread for the duration of a run, and the QML is one file with no dark-mode support. See the [README.md](README.md) roadmap.
 
 ## Fixed Constraints (decided — do not relitigate)
 1. **The core depends on `ModelManager` only.** `PhysiCellModelManager` moves to `[weakdeps]`; PhysiCell knowledge reaches the GUI through a package extension. `ModelManager` is imported as `import ModelManager as MM`, and the `MM.` vs `PhysiCellModelManager.` prefix **is** the boundary marker — anything still qualified with the latter is unfinished extension work and is greppable as such.
@@ -32,7 +31,6 @@ Three things it does, in order of importance:
 5. **User input is never `eval`ed.** Value expressions are parsed against a whitelisted AST. `Meta.parse |> eval` at module scope was the original implementation; it is arbitrary code execution and it also blocks any future `juliac` compilation.
 
 ## Relationship to MM and PCMM
-Both are read-only boundaries from this repo. Do **not** edit files under `~/.julia/dev/ModelManager/` or `~/.julia/dev/PhysiCellModelManager/` in a Studio session — collect the needed changes as bullets for the maintainer instead (see [progress.md](progress.md), "Cross-repo asks").
 
 Two traps worth knowing:
 - PCMM `@reexport using ModelManager`, so MM's **exported** names resolve as `PhysiCellModelManager.x`. Unexported ones do not. `variationTarget` and `variationValues` are unexported, so reaching them through PCMM is an `UndefVarError` on PCMM ≥ 0.3 — it compiles fine and fails at runtime.
@@ -73,10 +71,10 @@ Consistent with ModelManager.jl / the PhysiCell ecosystem:
 
 ## Required Workflow for Any Change
 1. Produce a **design brief** in the assistant response **before any code changes**; wait for human approval.
-2. On approval: update [PRD.md](PRD.md) with the new/changed feature, and open a new [progress.md](progress.md) entry.
+2. On approval: update [PRD.md](PRD.md) with the new/changed feature.
 3. Create the feature branch and implement there.
-4. Update the [README.md](README.md) Implementation Status when a feature is complete.
-5. Trim PRD.md and progress.md to reflect the final implementation.
+4. Tick the [README.md](README.md) roadmap entry when a feature is complete.
+5. Trim PRD.md to reflect the final implementation.
 6. Present the diff for review; commit once reviewed. Merge to `main` only on explicit request.
 
 **Design brief template:**
@@ -94,7 +92,7 @@ A feature is complete when **all** are true:
 1. **Tests pass:** `julia --project=. -e 'using Pkg; Pkg.test()'` runs green — locally, not only in CI.
 2. **Recorded in the transcript:** the action appears in `mms_records/` output as runnable code (Fixed Constraint 2).
 3. **Docstrings written:** every exported and every QML-facing function has a docstring.
-4. **README updated:** Implementation Status marks the feature complete.
+4. **README updated:** the roadmap entry is ticked or removed.
 5. **PRD reflects reality.**
 6. **No regressions.**
 
@@ -134,7 +132,7 @@ Tokens carrying a colon must have **exactly two** colons (`tag:attr:value`). MM'
 - Sibling repos for reference: `~/.julia/dev/{ModelManager,PhysiCellModelManager,Montage,BergiCellModelManager,PhysiCellDashboard}`.
 
 ## To-dos
-See [README.md](README.md) Implementation Status for the feature-by-feature record and [progress.md](progress.md) for open decisions. The near-term sequence:
+See the [README.md](README.md) roadmap. The near-term sequence:
 
 1. **Framework-agnostic core** — define the parameter-browser interface, implement the generic XML default, move PhysiCell knowledge into `ext/`. Target: `grep -ri physicell src/ assets/` returns nothing outside `ext/`.
 2. **Error surface + non-blocking run** — a log pane fed by a captured logger, `run` on a worker task with `on_progress` marshalled through a `Channel` drained by a QML `Timer`. Never `@emit` across threads.

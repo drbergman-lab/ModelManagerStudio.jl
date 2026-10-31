@@ -10,7 +10,7 @@ A desktop GUI for [ModelManager.jl](https://github.com/drbergman-lab/ModelManage
 > **Naming:** this package is likely to be renamed before 0.1.0. "Studio" already means
 > [PhysiCell Studio](https://github.com/PhysiCell-Tools/PhysiCell-Studio) in this ecosystem — and
 > PhysiCellModelManager's own `runStudio()` launches *that* tool, not this one. See
-> [progress.md](progress.md), "Open: package name".
+> the roadmap below.
 
 ## What it does
 
@@ -86,33 +86,17 @@ You need an existing project. To make one, see PhysiCellModelManager's `createPr
 | `STUDIO_COLOR_TOKEN` | Pick the color scheme instead of getting a random one. One of `dodgers`, `michigan`, `orioles`, `ravens`, `angels`, `umb`, `hopkins`, `csulb`, `uci`. |
 | `MODEL_MANAGER_STUDIO_TESTING` | When `true`, the window closes itself on a timer. For CI; not useful interactively. |
 
-## Implementation Status
+## Roadmap
 
-### Completed
-
-- **Input folder selection** — required and optional locations discovered generically from the project's `inputs.toml`; no location names hardcoded in the GUI.
-- **Parameter browser** — a generic walk of each location's base XML. Tokens are path elements, so every varied location is browsable and every offered chain resolves. No simulator-specific vocabulary.
-- **Variations** — discrete value sets, ranges, and (via the value expression) distributions. One variation per target, editable in place.
-- **Run** — launches the campaign through `ModelManager.run`.
-- **Session transcript** — replayable `.jl` script written to `mms_records/`.
-- **PCMM 0.3 / ModelManager 0.8** — runs on the split stack, with `ModelManager` as a direct dependency.
-
-### In progress
-
-- **Framework-agnostic core** — moving PhysiCell parameter knowledge behind an extension point so the core depends only on `ModelManager`. Roughly 290 of 619 Julia lines are PhysiCell-specific today.
-- **Error surface** — the GUI currently reports failures only to stdout/stderr, so it is usable only when launched from a terminal.
-- **Non-blocking run** — `run` is called on the UI thread, so the window freezes for the duration of a campaign. `ModelManager.run`'s `on_progress` hook is the intended fix.
-
-### Planned
-
-- **Covariations and latent variations** — `CoVariation` and `LatentVariation` are fully supported by ModelManager but unreachable from the GUI.
-- **Sampling methods** — `GridVariation`, `LHSVariation`, `SobolVariation`, `RBDVariation`, with a preview of the exact parameter points before anything is written to disk.
-- **Sensitivity analysis** — MOAT, Sobolʼ, and RBD designs, with results rendered per method.
-- **Calibration** — ABC-SMC setup, a live per-generation convergence view, and resume.
-- **Analysis** — browse, filter, and tag past runs from the project database.
-- **Visualization** — via [Montage.jl](https://github.com/drbergman-lab/Montage.jl), behind an extension.
-
-See [PRD.md](PRD.md) for the behavioral spec and [progress.md](progress.md) for design rationale.
+- [ ] Split `assets/ModelManagerStudio.qml` into a component library with a `Theme` singleton; dark mode is currently unreadable
+- [ ] Move token-chain and target state into Julia-owned `Observables` so QML holds no snapshots
+- [ ] Run campaigns off the UI thread via `run`'s `on_progress` hook — the window currently freezes for the duration
+- [ ] Invalidate variations when the input folders change
+- [ ] Covariations and latent variations (`CoVariation`, `LatentVariation`)
+- [ ] Sampling methods with a pre-commit preview (`GridVariation`, `LHSVariation`, `SobolVariation`, `RBDVariation`)
+- [ ] Sensitivity analysis (MOAT, Sobolʼ, RBD) and calibration (ABC-SMC) with live progress
+- [ ] Analysis pane over the project database; visualization via [Montage.jl](https://github.com/drbergman-lab/Montage.jl)
+- [ ] Rename the package — "Studio" collides with PhysiCell Studio, which PCMM's own `runStudio()` launches
 
 ## Related packages
 

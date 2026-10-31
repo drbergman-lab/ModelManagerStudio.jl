@@ -27,18 +27,22 @@ ApplicationWindow {
     // PhysiCell vocabulary. Keying on the tag is generic: it colours every kind of named
     // instance any backend produces, not three known ones.
     property var tagPalette: ["#206020", "#2060A0", "#8C5A14", "#6A3D9A", "#0F7F7F", "#A02020"]
+    property color emphasisColor: "#A02020"
     property var tagColors: ({})
     property int tagColorCursor: 0
 
-    function colorForTag(tag) {
-        if (!tag || tag === "")
+    // Keyed on the instance NAME, not its tag, so "tumor" keeps one colour wherever it turns
+    // up -- as a cell definition, an adhesion target, a transformation target -- which is the
+    // only thing that makes the colour worth reading.
+    function colorForName(name) {
+        if (!name || name === "")
             return "#000000";
 
-        if (tagColors[tag] === undefined) {
-            tagColors[tag] = tagPalette[tagColorCursor % tagPalette.length];
+        if (tagColors[name] === undefined) {
+            tagColors[name] = tagPalette[tagColorCursor % tagPalette.length];
             tagColorCursor = tagColorCursor + 1;
         }
-        return tagColors[tag];
+        return tagColors[name];
     }
 
     // Breathing room added to a ComboBox on top of its own padding and indicator width.
@@ -702,7 +706,8 @@ ApplicationWindow {
                                                 property int longestTextWidth: 0
                                                 // Branch/leaf and tag per entry, index-parallel to `model`.
                                                 property var itemKinds: []
-                                                property var itemTags: []
+                                                property var itemNames: []
+                                                property var itemEmphases: []
 
                                                 // Search-within-a-level. The walk produces honest but deep
                                                 // paths, so a level can hold many siblings; typing narrows
@@ -737,7 +742,8 @@ ApplicationWindow {
                                                         toks.push(tokenComboBoxRepeater.itemAt(i).currentText);
                                                     }
                                                     itemKinds = Julia.get_token_kinds.apply(Julia, toks);
-                                                    itemTags = Julia.get_token_tags.apply(Julia, toks);
+                                                    itemNames = Julia.get_token_names.apply(Julia, toks);
+                                                    itemEmphases = Julia.get_token_emphases.apply(Julia, toks);
                                                 }
 
                                                 function updateLongestTextWidth() {
@@ -778,7 +784,8 @@ ApplicationWindow {
 
                                                     property bool opensMenu: index < tokenComboBox.itemKinds.length && tokenComboBox.itemKinds[index] === "branch"
                                                     property bool matches: tokenComboBox.matchesFilter(modelData)
-                                                    property string tokenTag: index < tokenComboBox.itemTags.length ? tokenComboBox.itemTags[index] : ""
+                                                    property string tokenName: index < tokenComboBox.itemNames.length ? tokenComboBox.itemNames[index] : ""
+                                                    property string emphasis: index < tokenComboBox.itemEmphases.length ? tokenComboBox.itemEmphases[index] : ""
 
                                                     width: ListView.view ? ListView.view.width : implicitWidth
                                                     visible: matches
@@ -793,12 +800,16 @@ ApplicationWindow {
                                                         Text {
                                                             width: parent.width - (tokenItem.opensMenu ? 18 : 0)
                                                             text: modelData
-                                                            color: mainWindow.colorForTag(tokenItem.tokenTag)
+                                                            color: tokenItem.emphasis !== "" ? mainWindow.emphasisColor
+                                                                 : mainWindow.colorForName(tokenItem.tokenName)
                                                             // Bold marks a named instance from the model
                                                             // (a cell definition, a substrate) as opposed to
-                                                            // a structural tag -- so the distinction survives
-                                                            // for anyone who cannot rely on colour.
-                                                            font.bold: tokenItem.tokenTag !== ""
+                                                            // a structural tag; italic marks whatever the
+                                                            // backend flagged. Neither rests on colour alone.
+                                                            font.bold: tokenItem.tokenName !== ""
+                                                            font.italic: tokenItem.emphasis !== ""
+                                                            ToolTip.visible: tokenItem.hovered && tokenItem.emphasis !== ""
+                                                            ToolTip.text: tokenItem.emphasis
                                                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
                                                             elide: Text.ElideRight
                                                             verticalAlignment: Text.AlignVCenter
@@ -882,7 +893,8 @@ ApplicationWindow {
                                                     if (model === undefined || model.length === 0) {
                                                         longestTextWidth = 0;
                                                         itemKinds = [];
-                                                        itemTags = [];
+                                                        itemNames = [];
+                                                        itemEmphases = [];
                                                         return ;
                                                     }
                                                     updateLongestTextWidth();

@@ -2,7 +2,7 @@
 
 > Behavioral specification. Each feature states what it must do, how it must fail, and
 > the edge cases that have bitten us. [README.md](README.md) tracks *whether* something is
-> built; this file specifies *how it must behave*. [progress.md](progress.md) records why.
+> built; this file specifies *how it must behave*.
 
 ---
 
@@ -349,7 +349,7 @@ right of this one, so the chain would churn as the user types.
 
 ## Still open
 
-- **Package name.** "Studio" collides with PhysiCell Studio, which PCMM's own `runStudio()` launches. See [progress.md](progress.md).
+- **Package name.** "Studio" collides with PhysiCell Studio, which PCMM's own `runStudio()` launches.
 - **Where the uncommitted design is persisted** — a TOML spec file beside the transcript, or an extension of the transcript itself.
 - **Whether the transcript and the design spec are one artifact or two.** One file is simpler; two lets the design be edited without rewriting history.
 - **Windows support.** Currently untested and unclaimed.

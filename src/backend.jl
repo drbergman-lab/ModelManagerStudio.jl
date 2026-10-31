@@ -64,6 +64,21 @@ function studio_no_project_message(::MM.AbstractSimulator)
 end
 
 """
+    studio_token_emphasis(sim, location::Symbol, chain::Vector{String}, token::AbstractString)
+
+Whether `token` deserves visual emphasis in the parameter browser, as a short label, or `""`.
+
+The generic default emphasizes nothing: the browser reads the document, and a document cannot
+say which of its elements are interesting. A backend knows things the XML does not — PhysiCell's
+`custom_data` children are user-defined rather than part of the schema, which is worth marking
+and is not inferable from the element itself.
+
+Returned labels are backend-defined; the GUI styles anything non-empty and shows the label in a
+tooltip, so a backend can introduce one without a change here.
+"""
+studio_token_emphasis(::MM.AbstractSimulator, ::Symbol, ::Vector{String}, ::AbstractString) = ""
+
+"""
     studio_backend()
 
 The active simulator, or `nothing` when no backend package has registered one.
