@@ -79,13 +79,25 @@ studio_token_color(sim, loc, chain, t) -> Union{String,Nothing}  # which tokens 
   document, which is the same operation for any backend whose inputs are XML. Its *reading* is,
   because the document does not carry that meaning.
 - `studio_token_color` returns one colour per **category** of name, not per name. PhysiCell
-  returns one for cell definitions, one for substrates, one for `custom_data` children, and
-  `nothing` for its own schema — so a category reads the same wherever in the tree it appears.
-  Colouring each instance separately only restates the word already on the row.
-- The first two categories are decided by looking a token's name up in the config's own
-  declarations, never by listing the tags a name can appear under: PhysiCell adds such tags
+  returns one for cell definitions, one for substrates, one for custom data, and `nothing` for
+  its own schema — so a category reads the same wherever in the tree it appears. Colouring each
+  instance separately only restates the word already on the row.
+- All three are decided by looking a token up in the config's own declarations, never by listing
+  the places a name can appear: PhysiCell adds tags that carry cell or substrate names
   (`attack_rate`, `fuse_rate`, `chemotactic_sensitivity`, ...) with every release, and a list
   here would go stale silently.
+- Custom data is keyed by **tag** — its `<custom_data>` children are the parameters themselves —
+  and the vocabulary is **unioned across every cell definition**. PhysiCell inherits a
+  definition's custom data from its parent and appends, so a later definition can declare tags
+  no earlier one has: `sample_projects/physimess` gives `ecm` eighteen entries against `cell`'s
+  eleven, seven of them unique.
+- A custom-data name also appears as a rule's signal or behavior, prefixed:
+  `<behavior name="custom:damage_rate">`. That form is unambiguous, so it colours anywhere. The
+  **bare** tag is not: `sample_projects/cancer_biorobots` declares `damage_rate` as custom data
+  while carrying PhysiCell's own `cell_integrity/damage_rate` in the same cell definitions, and
+  PhysiCell keeps promoting custom-data names into the schema. A bare tag therefore counts only
+  inside `<custom_data>`.
+- Hue alone carries the category; no font channel duplicates it.
 - A return that is not a hex colour, and a hook that throws, both reduce to "no colour". This is
   reached from a QML property binding, where neither can be allowed to surface.
 

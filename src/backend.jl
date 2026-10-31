@@ -71,15 +71,11 @@ end
 The colour the parameter browser should draw `token` in, as a hex string (`"#RRGGBB"`), or
 `nothing` when the backend has nothing to say about it.
 
-The generic default colours nothing: the browser reads the document, and a document cannot say
-which of its elements belong to a category a reader cares about. A backend knows what the XML
-does not -- PhysiCell can tell that a token names a cell definition, a substrate, or a
-user-defined custom-data entry, none of which is inferable from the element itself.
-
-The point of a colour here is that it is shared: every cell definition name draws the same,
-every substrate name draws another, wherever in the tree they turn up. That is a statement about
-*categories*, which only the backend can make -- keying on the token's own name instead gave
-every instance its own colour, which says nothing a reader did not already see in the text.
+One hue per *category* of name, shared across every token in it: every cell definition draws
+the same, every substrate another, wherever in the tree they turn up. The generic default
+colours nothing, because the browser has only the document and a document does not say which of
+its elements belong to a category a reader cares about. PhysiCell can: it knows a token names a
+cell definition, a substrate, or a custom-data entry.
 
 `missing` is accepted as a synonym for `nothing`. Anything that is not a `#RGB`, `#RRGGBB` or
 `#AARRGGBB` string is treated as no colour, with a debug message, so a malformed return is a dull

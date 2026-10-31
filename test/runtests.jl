@@ -234,17 +234,62 @@ createProject()
         @test all(t -> by_token[t] == substrate_color, substrate_tokens)
         @test all(t -> by_token[t] == "", [t for t in micro if !startswith(t, "variable:")])
 
-        #! Custom data has no name to look up -- its children are plain tags -- so the backend
-        #! recognises it by its parent.
+        #! Custom data has no name attribute to look up -- its children ARE the parameters --
+        #! so the tag is the key, drawn from every cell definition's block unioned together.
+        #! PhysiCell requires those blocks to agree and writes out the first one's set, so the
+        #! union is the model's vocabulary however a hand-edited config has drifted.
         custom_chain = ["cell_definitions", "cell_definition:name:default", "custom_data"]
         custom = ModelManagerStudio.get_next_model("config", custom_chain...)
         custom_colors = ModelManagerStudio.get_token_colors("config", custom_chain...)
         @test length(custom_colors) == length(custom)
-        if !isempty(custom)
-            @test all(==(custom_color), custom_colors)
+        @test !isempty(custom)
+        @test all(==(custom_color), custom_colors)
+
+        declared = ext.custom_data_names(ModelManagerStudio.base_document(:config))
+        @test !isempty(declared)
+        @test declared == Set(custom)
+        #! Unioned across cell definitions, not read off the first one.
+        doc = XMLDocument()
+        root = create_root(doc, "PhysiCell_settings")
+        defs = new_child(root, "cell_definitions")
+        for (cell, entries) in [("first", ["shared", "only_first"]), ("second", ["shared", "only_second"])]
+            cd = new_child(defs, "cell_definition")
+            set_attribute(cd, "name", cell)
+            block = new_child(cd, "custom_data")
+            for entry in entries
+                new_child(block, entry)
+            end
         end
-        #! Only in the config: a "custom_data" element elsewhere is not PhysiCell's custom data.
-        @test isnothing(ModelManagerStudio.studio_token_color(sim, :ic_cell, ["custom_data"], "x"))
+        @test ext.custom_data_names(doc) == Set(["shared", "only_first", "only_second"])
+        free(doc)
+
+        #! A rule names a custom-data entry as a prefixed signal or behavior. That form is
+        #! unambiguous, so it colours wherever it appears.
+        K = ext.custom_data_key
+        @test K("custom:damage_rate") == "damage_rate"
+        @test K("custom: damage_rate") == "damage_rate"
+        @test K("damage_rate") == ""
+        @test K("oxygen") == ""
+        for entry in custom
+            rule_token = "behavior:name:custom:" * entry
+            @test ModelManagerStudio.studio_token_color(sim, :rulesets_collection,
+                ["behavior_ruleset:name:default"], rule_token) == custom_color
+        end
+        #! An undeclared name is not coloured just for carrying the prefix.
+        @test isnothing(ModelManagerStudio.studio_token_color(sim, :rulesets_collection,
+            ["behavior_ruleset:name:default"], "behavior:name:custom:not_declared"))
+
+        #! Unprefixed, the name is not unique, so a bare tag counts only inside <custom_data>.
+        #! sample_projects/cancer_biorobots ships `damage_rate` as custom data AND as
+        #! PhysiCell's own cell_integrity/damage_rate in the same cell definitions.
+        for entry in custom
+            @test ModelManagerStudio.studio_token_color(sim, :config, ["custom_data"], entry) == custom_color
+            @test isnothing(ModelManagerStudio.studio_token_color(sim, :config,
+                ["phenotype", "cell_integrity"], entry))
+            @test isnothing(ModelManagerStudio.studio_token_color(sim, :config, String[], entry))
+        end
+        #! An element PhysiCell declares itself is not any of the three.
+        @test isnothing(ModelManagerStudio.studio_token_color(sim, :config, ["custom_data"], "custom_data"))
         @test isnothing(ModelManagerStudio.studio_token_color(sim, :config, String[], "anything"))
 
         #! The generic default colours nothing, so a backend that ignores the hook still works.

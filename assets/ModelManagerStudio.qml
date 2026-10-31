@@ -19,13 +19,9 @@ ApplicationWindow {
     property color unusedTint: "#e6e8ea"
     property color unusedTextColor: "#8a8f98"
 
-    // Default colour for a token the backend says nothing about: PhysiCell's own schema,
-    // which is most of the document. The backend supplies a hex for the rest, one colour per
-    // category of name it recognises (cell definitions, substrates, custom data), so a
-    // category reads the same wherever in the tree it turns up.
-    //
-    // Studio assigns none of these itself. It has the XML, and the XML does not know which of
-    // its elements a modeller thinks of as a group.
+    // Colour for a token the backend says nothing about -- for PhysiCell, its own schema,
+    // which is most of the document. The backend supplies a hex for the rest, one hue per
+    // category of name it recognises, so a category reads the same wherever it turns up.
     property color defaultTokenColor: "#000000"
 
     // Breathing room added to a ComboBox on top of its own padding and indicator width.
@@ -783,10 +779,6 @@ ApplicationWindow {
                                                             text: modelData
                                                             color: tokenItem.tokenColor !== "" ? tokenItem.tokenColor
                                                                  : mainWindow.defaultTokenColor
-                                                            // Bold carries the same distinction as the colour,
-                                                            // so a reader who cannot separate the hues still
-                                                            // sees which rows name something in the model.
-                                                            font.bold: tokenItem.tokenColor !== ""
                                                             font.pixelSize: mainWindow.fontSizeOfLevel[2]
                                                             elide: Text.ElideRight
                                                             verticalAlignment: Text.AlignVCenter

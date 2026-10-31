@@ -275,8 +275,7 @@ Hex colour per entry, parallel to [`get_next_model`](@ref); `""` where the backe
 which case the GUI uses its own default. Called from QML.
 
 The colour is the backend's statement that an entry belongs to a category of its model -- a cell
-definition, a substrate -- so that the category reads the same everywhere it appears. Studio
-itself assigns no colours: it has only the document, which does not know its own categories.
+definition, a substrate -- so that the category reads the same everywhere it appears.
 """
 function get_token_colors(tokens::Vararg{AbstractString})
     toks = [String.(tokens)...]
