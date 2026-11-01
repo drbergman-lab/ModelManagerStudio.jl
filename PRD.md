@@ -91,11 +91,11 @@ studio_token_color(sim, loc, chain, t) -> Union{String,Nothing}  # which tokens 
   definition's custom data from its parent and appends, so a later definition can declare tags
   no earlier one has: `sample_projects/physimess` gives `ecm` eighteen entries against `cell`'s
   eleven, seven of them unique.
-- A custom-data name also appears as a rule's signal or behavior, in the three spellings
-  `PhysiCell_signal_behavior.cpp` registers: `custom:<name>`, `custom: <name>`, and
-  `custom <index>` — the last positional, counted from zero along the entries PhysiCell folds
-  into `cell_defaults` (the definitions named `default` or carrying `ID="0"`). All three are
-  unambiguous, so they colour anywhere. The
+- A custom-data name also appears as a rule's signal or behavior, spelled `custom:<name>` or
+  `custom: <name>`. Both are unambiguous, so they colour anywhere.
+  `PhysiCell_signal_behavior.cpp` registers a third form, `custom <index>`, positional into the
+  `cell_defaults` list — deliberately **not** resolved. Naming a parameter by its position in a
+  file is not something a colour helps with. The
   **bare** tag is not: `sample_projects/cancer_biorobots` declares `damage_rate` as custom data
   while carrying PhysiCell's own `cell_integrity/damage_rate` in the same cell definitions, and
   PhysiCell keeps promoting custom-data names into the schema. A bare tag therefore counts only

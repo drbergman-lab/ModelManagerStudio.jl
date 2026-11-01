@@ -81,12 +81,11 @@ const CELL_DEFINITION_COLOR = "#2060A0"
 const SUBSTRATE_COLOR = "#206020"
 const CUSTOM_DATA_COLOR = "#8C5A14"
 
-#! The three spellings `PhysiCell_signal_behavior.cpp` registers for a custom-data entry used
-#! as a signal or behavior: `"custom:" + name`, `"custom: " + name`, and `"custom " + index`.
-#! The third is POSITIONAL -- `std::to_string(nc)`, the loop counter -- not another spelling of
-#! the name, so resolving it needs the ordered list, not the set.
+#! How `PhysiCell_signal_behavior.cpp` spells a custom-data entry used as a signal or behavior.
+#! It also registers `"custom " + std::to_string(nc)`, a positional index into the cell_defaults
+#! list, which is deliberately not resolved here: anyone writing `custom 3` in a rule is naming
+#! a parameter by its position in a file, and a colour is not what they need from the browser.
 const CUSTOM_DATA_NAME_PREFIXES = ["custom:", "custom: "]
-const CUSTOM_DATA_INDEX_PREFIX = "custom "
 
 """
     studio_token_color(::PhysiCellSimulator, location, chain, token)
@@ -104,16 +103,16 @@ can appear under. PhysiCell adds such tags (`attack_rate`, `fuse_rate`,
 """
 function MMS.studio_token_color(::PhysiCellSimulator, ::Symbol,
                                 chain::Vector{String}, token::AbstractString)
-    vocabulary = model_names()
+    cell_definitions, substrates, custom_data = model_names()
 
     instance = MMS.token_name(token)
     if !isempty(instance)
-        instance in vocabulary.cell_definitions && return CELL_DEFINITION_COLOR
-        instance in vocabulary.substrates && return SUBSTRATE_COLOR
+        instance in cell_definitions && return CELL_DEFINITION_COLOR
+        instance in substrates && return SUBSTRATE_COLOR
         #! A rule names a custom-data entry as a signal or a behavior:
         #! `<behavior name="custom:damage_rate">`, `<signal name="custom:PKPD_D1_damage">`.
         #! An intracellular mapping's `physicell_name` carries the same form.
-        isempty(custom_data_key(instance, vocabulary)) || return CUSTOM_DATA_COLOR
+        isempty(custom_data_key(instance, custom_data)) || return CUSTOM_DATA_COLOR
         return nothing
     end
 
@@ -123,76 +122,55 @@ function MMS.studio_token_color(::PhysiCellSimulator, ::Symbol,
     #! and PhysiCell keeps promoting custom-data names into the schema (`damage_rate`,
     #! `attachment_rate`), so the collision class grows with each release.
     (isempty(chain) || last(chain) != "custom_data") && return nothing
-    return String(token) in vocabulary.custom_data ? CUSTOM_DATA_COLOR : nothing
+    return String(token) in custom_data ? CUSTOM_DATA_COLOR : nothing
 end
 
 """
-    custom_data_key(name, vocabulary)
+    custom_data_key(name, declared)
 
 The declared custom-data tag `name` refers to, or `""` if it refers to none.
 
-Resolves all three spellings PhysiCell accepts:
-
-- `"custom:damage_rate"` and `"custom: damage_rate"` — the tag, looked up in the unioned set
-- `"custom 3"` — an **index**, resolved through the ordered list it counts along
-
-An index that names no entry, and a name that is not declared, both come back `""`, so a rule
-referring to something this config does not have is left uncoloured rather than guessed at.
+`"custom:damage_rate"` and `"custom: damage_rate"` both yield `"damage_rate"`, provided the
+config declares it. A rule naming something this config does not have is left uncoloured rather
+than guessed at.
 """
-function custom_data_key(name::AbstractString, vocabulary)
+function custom_data_key(name::AbstractString, declared)
     for prefix in CUSTOM_DATA_NAME_PREFIXES
         startswith(name, prefix) || continue
         tag = String(lstrip(SubString(name, length(prefix) + 1)))
-        return tag in vocabulary.custom_data ? tag : ""
+        return tag in declared ? tag : ""
     end
-
-    startswith(name, CUSTOM_DATA_INDEX_PREFIX) || return ""
-    index = tryparse(Int, strip(SubString(name, length(CUSTOM_DATA_INDEX_PREFIX) + 1)))
-    isnothing(index) && return ""
-    #! PhysiCell counts from zero.
-    return checkbounds(Bool, vocabulary.ordered_custom_data, index + 1) ?
-           vocabulary.ordered_custom_data[index + 1] : ""
+    return ""
 end
 
 """
     model_names()
 
-Everything this project's config declares a name for, as a named tuple:
+The cell definition, substrate and custom-data names this project declares, as three sets.
 
-- `cell_definitions`, `substrates`, `custom_data` — sets, for membership
-- `ordered_custom_data` — the list `"custom <index>"` counts along
-
-Empty collections when the config is unreadable, which colours nothing rather than failing —
-this is reached from a GUI property binding.
+Empty sets when the config is unreadable, which colours nothing rather than failing — this is
+reached from a GUI property binding.
 
 Not cached: `base_document` already holds the parsed config, so this is a walk over the
 declaration blocks, run once per dropdown level rather than once per row.
 """
 function model_names()
     doc = MMS.base_document(:config)
-    isnothing(doc) && return (cell_definitions=Set{String}(), substrates=Set{String}(),
-                              custom_data=Set{String}(), ordered_custom_data=String[])
-    unioned, ordered = custom_data_names(doc)
-    return (cell_definitions=declared_names(doc, ["cell_definitions"], "cell_definition"),
-            substrates=declared_names(doc, ["microenvironment_setup"], "variable"),
-            custom_data=unioned, ordered_custom_data=ordered)
+    isnothing(doc) && return (Set{String}(), Set{String}(), Set{String}())
+    return (declared_names(doc, ["cell_definitions"], "cell_definition"),
+            declared_names(doc, ["microenvironment_setup"], "variable"),
+            custom_data_names(doc))
 end
 
 """
     custom_data_names(doc)
 
-`(unioned, ordered)` — every custom-data tag any cell definition declares, and the ordered list
-that a positional `"custom <index>"` reference counts along.
+Every custom-data tag any cell definition declares, unioned.
 
 The union is not a formality. PhysiCell inherits a definition's custom data from its parent and
 appends, so a later definition can declare tags no earlier one has: `sample_projects/physimess`
 gives `ecm` eighteen entries against `cell`'s eleven, seven of which appear in no other
 definition.
-
-The ordered list comes from the definitions PhysiCell loads into `cell_defaults` — those named
-`default` or carrying `ID="0"` — because those are the variables it numbers when it registers
-`"custom 0"`, `"custom 1"`, ... They all parse into the same object, find-or-add, so a document
-with several of them contributes each in turn.
 """
 function custom_data_names(doc::XMLDocument)
     cell_definitions = try
@@ -200,25 +178,18 @@ function custom_data_names(doc::XMLDocument)
     catch
         nothing
     end
-    isnothing(cell_definitions) && return (Set{String}(), String[])
+    isnothing(cell_definitions) && return Set{String}()
 
-    unioned = Set{String}()
-    ordered = String[]
+    out = Set{String}()
     for cell_definition in child_elements(cell_definitions)
         LightXML.name(cell_definition) == "cell_definition" || continue
-        counts_for_defaults = attribute(cell_definition, "name") == "default" ||
-                              attribute(cell_definition, "ID") == "0"
         for block in get_elements_by_tagname(cell_definition, "custom_data")
             for entry in child_elements(block)
-                tag = LightXML.name(entry)
-                push!(unioned, tag)
-                if counts_for_defaults && !(tag in ordered)
-                    push!(ordered, tag)
-                end
+                push!(out, LightXML.name(entry))
             end
         end
     end
-    return (unioned, ordered)
+    return out
 end
 
 """
