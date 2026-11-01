@@ -10,14 +10,53 @@ ApplicationWindow {
 
     // The highlight applied to an input location whose folder supports parameter variation.
     // Defined once so the legend swatch and the location tiles cannot drift apart.
-    property color variedHighlight: "#d0e8ff"
+    property color variedHighlight: "#cfe6ff"
     property string variedMarker: "\u25C8"   // ◈ — a non-color cue, since color alone fails WCAG 1.4.1
 
     // An optional location with no folder chosen. It gets a filled tile of the SAME geometry
     // as a varied one, so the grid reads as a set of equal cells in three states rather than
     // some tiles having a box and others floating with no boundary at all.
-    property color unusedTint: "#e6e8ea"
-    property color unusedTextColor: "#8a8f98"
+    property color unusedTint: "#d2d7dd"
+    property color unusedTextColor: "#767d86"
+
+    // The page sits a shade darker than an in-use tile and a shade lighter than an unused one,
+    // so the three tile states read as three states rather than as one flat field.
+    property color pageBackground: "#e4e8ed"
+    property color tileBackground: "#ffffff"
+
+    // An enabled button is white with a dark edge; a disabled one is flat and grey. Qt's Basic
+    // style gives both the same grey, which on this page reads as "disabled" throughout.
+    property color buttonBackground: "#ffffff"
+    property color buttonBorder: "#8d97a3"
+    property color buttonPressed: "#d9e4f0"
+    property color buttonHovered: "#f2f6fb"
+    property color buttonDisabledBackground: "#dde1e6"
+    property color buttonDisabledBorder: "#c4c9cf"
+    property color buttonDisabledText: "#949aa2"
+
+    component ActionButton: Button {
+        id: actionButton
+
+        background: Rectangle {
+            radius: 4
+            color: !actionButton.enabled ? mainWindow.buttonDisabledBackground
+                 : actionButton.down ? mainWindow.buttonPressed
+                 : actionButton.hovered ? mainWindow.buttonHovered
+                 : mainWindow.buttonBackground
+            border.width: 1
+            border.color: actionButton.enabled ? mainWindow.buttonBorder
+                                               : mainWindow.buttonDisabledBorder
+        }
+
+        contentItem: Text {
+            text: actionButton.text
+            font: actionButton.font
+            color: actionButton.enabled ? syscolors.text : mainWindow.buttonDisabledText
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+    }
 
     // Colour for a token the backend says nothing about -- for PhysiCell, its own schema,
     // which is most of the document. The backend supplies a hex for the rest, one hue per
@@ -128,7 +167,7 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#f0f0f0"
+                color: mainWindow.pageBackground
 
                 ColumnLayout {
                     spacing: 10 // Reduced spacing for more compact vertical layout
@@ -169,10 +208,10 @@ ApplicationWindow {
                                 height: columnLayout.implicitHeight + 10 // padding/margin
                                 color: locationItem.isVaried ? mainWindow.variedHighlight
                                      : locationItem.isUnused ? mainWindow.unusedTint
-                                     : "transparent"
+                                     : mainWindow.tileBackground
                                 radius: 4
                                 border.width: 1
-                                border.color: color === "transparent" ? "transparent" : Qt.darker(color, 1.2)
+                                border.color: Qt.darker(color, 1.25)
 
                                 ColumnLayout {
                                     id: columnLayout
@@ -219,61 +258,6 @@ ApplicationWindow {
 
                         }
 
-                    }
-
-                    // Legend: the highlight is otherwise unexplained, and it is the only
-                    // thing telling the user which locations can carry a variation.
-                    RowLayout {
-                        Layout.alignment: Qt.AlignCenter
-                        Layout.topMargin: 4
-                        spacing: 6
-
-                        // The swatch carries the glyph, so it is a miniature of an actual
-                        // varied tile rather than two separate cues sitting next to a
-                        // sentence that has to explain both.
-                        Rectangle {
-                            width: legendGlyph.implicitWidth + 8
-                            height: legendGlyph.implicitHeight + 4
-                            radius: 3
-                            color: mainWindow.variedHighlight
-                            border.width: 1
-                            border.color: Qt.darker(mainWindow.variedHighlight, 1.2)
-                            Layout.alignment: Qt.AlignVCenter
-
-                            Text {
-                                id: legendGlyph
-
-                                anchors.centerIn: parent
-                                text: mainWindow.variedMarker
-                                color: syscolors.text
-                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
-                            }
-                        }
-
-                        Text {
-                            text: "can be varied"
-                            color: syscolors.text
-                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
-                            Layout.alignment: Qt.AlignVCenter
-                            rightPadding: 10
-                        }
-
-                        Rectangle {
-                            width: legendGlyph.implicitWidth + 8
-                            height: legendGlyph.implicitHeight + 4
-                            radius: 3
-                            color: mainWindow.unusedTint
-                            border.width: 1
-                            border.color: Qt.darker(mainWindow.unusedTint, 1.2)
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-
-                        Text {
-                            text: "not in use"
-                            color: mainWindow.unusedTextColor
-                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
-                            Layout.alignment: Qt.AlignVCenter
-                        }
                     }
 
                     // Required Locations
@@ -362,8 +346,65 @@ ApplicationWindow {
 
                     }
 
+
+                    // Legend. Bottom right and muted: centred under the tab bar it read as a
+                    // row of buttons, which is the one thing it must not look like.
+                    RowLayout {
+                        Layout.alignment: Qt.AlignRight
+                        Layout.rightMargin: 16
+                        Layout.topMargin: 2
+                        spacing: 5
+
+                        // The swatch carries the glyph, so it is a miniature of an actual
+                        // varied tile rather than two separate cues sitting next to a
+                        // sentence that has to explain both.
+                        Rectangle {
+                            width: legendGlyph.implicitWidth + 6
+                            height: legendGlyph.implicitHeight + 2
+                            radius: 2
+                            color: mainWindow.variedHighlight
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.variedHighlight, 1.25)
+                            Layout.alignment: Qt.AlignVCenter
+
+                            Text {
+                                id: legendGlyph
+
+                                anchors.centerIn: parent
+                                text: mainWindow.variedMarker
+                                color: mainWindow.unusedTextColor
+                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            }
+                        }
+
+                        Text {
+                            text: "can be varied"
+                            color: mainWindow.unusedTextColor
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            Layout.alignment: Qt.AlignVCenter
+                            rightPadding: 10
+                        }
+
+                        Rectangle {
+                            width: legendGlyph.implicitWidth + 6
+                            height: legendGlyph.implicitHeight + 2
+                            radius: 2
+                            color: mainWindow.unusedTint
+                            border.width: 1
+                            border.color: Qt.darker(mainWindow.unusedTint, 1.25)
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        Text {
+                            text: "not in use"
+                            color: mainWindow.unusedTextColor
+                            font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                    }
+
                     // Button to create inputs
-                    Button {
+                    ActionButton {
                         Layout.alignment: Qt.AlignCenter
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 40
@@ -558,7 +599,7 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#f0f0f0"
+                color: mainWindow.pageBackground
 
                 ColumnLayout {
                     spacing: 10 // Reduced spacing for more compact vertical layout
@@ -750,6 +791,22 @@ ApplicationWindow {
                                                 }
 
                                                 font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                                // The closed box shows the same hue as the row that was
+                                                // picked, so a chain stays readable once it is built --
+                                                // not only while a menu happens to be open.
+                                                contentItem: Text {
+                                                    text: tokenComboBox.displayText
+                                                    font: tokenComboBox.font
+                                                    color: {
+                                                        let i = tokenComboBox.currentIndex;
+                                                        if (i >= 0 && i < tokenComboBox.itemColors.length && tokenComboBox.itemColors[i] !== "")
+                                                            return tokenComboBox.itemColors[i];
+
+                                                        return mainWindow.defaultTokenColor;
+                                                    }
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
                                                 width: longestTextWidth + leftPadding + rightPadding
                                                        + (indicator ? indicator.width : 0)
                                                        + mainWindow.comboTextSlack
@@ -1060,7 +1117,7 @@ ApplicationWindow {
                         }
 
                         // Create variation button
-                        Button {
+                        ActionButton {
                             id: createVariationButton
 
                             // Whether this target already has a variation decides the label.
@@ -1136,7 +1193,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                             }
 
-                            Button {
+                            ActionButton {
                                 text: "Clear all"
                                 font.pixelSize: mainWindow.fontSizeOfLevel[4]
                                 enabled: currentVariationsFlickable.currentVariations.length > 0
@@ -1210,7 +1267,7 @@ ApplicationWindow {
                                                 // Until this existed the pending design could only
                                                 // grow: a mistaken variation meant restarting the app.
                                                 // Julia indices are 1-based; QML's `index` is 0-based.
-                                                Button {
+                                                ActionButton {
                                                     text: "\u2715"
                                                     font.pixelSize: mainWindow.fontSizeOfLevel[4]
                                                     implicitWidth: 28
@@ -1263,7 +1320,7 @@ ApplicationWindow {
             color: guiproperties.color_bottom
 
             // Run Simulation
-            Button {
+            ActionButton {
                 id: runSimulationButton
 
                 property string disabledText: "Create inputs first..."
