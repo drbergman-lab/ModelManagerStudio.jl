@@ -9,13 +9,12 @@ import InteractiveUtils
 #! a package extension, so Studio builds and loads without any particular simulator.
 #!
 #! Names MM exports but does not re-export cleanly are reached as `MM.` deliberately:
-#! `variationTarget` and `variationValues` are NOT exported by MM, so going through a
-#! re-exporting backend was an UndefVarError that only showed at runtime.
+#! `variationTarget` and `variationValues` are NOT exported by MM, so reaching them through a
+#! re-exporting backend is an UndefVarError that only shows at runtime.
 import ModelManager as MM
 #! Also brought in unqualified, because Studio constructs MM's exported types directly
 #! (`InputFolders`, `ElementaryVariation`, `DiscreteVariation`, `DistributedVariation`) and
-#! calls its exported `run`. These used to arrive via the backend's re-export of MM, which is
-#! exactly the coupling this extension split removes.
+#! calls its exported `run`.
 using ModelManager
 
 #! Imported by the backend extensions, which add methods to these.
@@ -572,9 +571,8 @@ function run_simulation()
 
     avs = [av for (_, av) in tokens_avs]
 
-    #! `record_run` used to be called BEFORE the run, so a campaign that threw was still
-    #! written to the transcript as though it had happened — the one thing the transcript is
-    #! supposed to guarantee. Record only after a successful return.
+    #! Record only after a successful return. A campaign that throws must not appear in the
+    #! transcript as though it had happened.
     try
         run(inputs, avs)
         record_run()

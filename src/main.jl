@@ -26,9 +26,9 @@ function _studio_main(args)
     end
 end
 
-#! `@main` requires Julia 1.11+, but `[compat] julia = "1.10"` and CI tests the LTS — so on
-#! 1.10 this file used to leave the package with no `main` at all, despite exporting the name.
-#! Define the plain function everywhere and attach the `@main` entrypoint only where it exists.
+#! `@main` requires Julia 1.11+, but `[compat] julia = "1.10"` and CI tests the LTS. Define the
+#! plain function everywhere — the package exports the name — and attach the `@main` entrypoint
+#! only where it exists.
 if VERSION >= v"1.11"
     @compat function @main(args)
         return _studio_main(args)

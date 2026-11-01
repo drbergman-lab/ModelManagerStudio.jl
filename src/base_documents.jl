@@ -1,10 +1,8 @@
 #! Cached access to each location's base XML document.
 #!
-#! Every parameter-browser helper used to do its own `prepareBaseFile` + `parse_file`, thirteen
-#! times over, and none of them called `free`. Two consequences: a libxml2 document leaked on
-#! every combo interaction, and because the QML delegate calls into the vocabulary helpers from
-#! inside per-item property bindings, opening one dropdown re-read the config from disk once
-#! per visible item per binding.
+#! The QML delegate reaches the parameter-browser helpers from inside per-item property
+#! bindings, so an uncached `prepareBaseFile` + `parse_file` re-reads the config from disk once
+#! per visible item per binding, and leaks a libxml2 document each time unless it is `free`d.
 #!
 #! Caching is keyed by the folder actually in use, so switching input folders invalidates
 #! automatically rather than relying on a caller to remember.

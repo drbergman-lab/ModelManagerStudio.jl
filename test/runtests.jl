@@ -245,35 +245,72 @@ createProject()
         @test !isempty(custom)
         @test all(==(custom_color), custom_colors)
 
-        declared = ext.custom_data_names(ModelManagerStudio.base_document(:config))
-        @test !isempty(declared)
+        declared, ordered = ext.custom_data_names(ModelManagerStudio.base_document(:config))
         @test declared == Set(custom)
-        #! Unioned across cell definitions, not read off the first one.
-        doc = XMLDocument()
-        root = create_root(doc, "PhysiCell_settings")
-        defs = new_child(root, "cell_definitions")
-        for (cell, entries) in [("first", ["shared", "only_first"]), ("second", ["shared", "only_second"])]
-            cd = new_child(defs, "cell_definition")
-            set_attribute(cd, "name", cell)
-            block = new_child(cd, "custom_data")
-            for entry in entries
-                new_child(block, entry)
-            end
-        end
-        @test ext.custom_data_names(doc) == Set(["shared", "only_first", "only_second"])
-        free(doc)
+        @test sort(ordered) == sort(custom)
 
-        #! A rule names a custom-data entry as a prefixed signal or behavior. That form is
-        #! unambiguous, so it colours wherever it appears.
-        K = ext.custom_data_key
+        #! Unioned across cell definitions, because PhysiCell inherits a definition's custom
+        #! data from its parent and appends -- a later definition can declare tags no earlier
+        #! one has. The ORDERED list is narrower: only the definitions PhysiCell folds into
+        #! cell_defaults (named "default" or carrying ID="0") are the ones it numbers.
+        function vocabulary_from(blocks)
+            doc = XMLDocument()
+            root = create_root(doc, "PhysiCell_settings")
+            defs = new_child(root, "cell_definitions")
+            for (cell, id, entries) in blocks
+                cd = new_child(defs, "cell_definition")
+                set_attribute(cd, "name", cell)
+                isnothing(id) || set_attribute(cd, "ID", id)
+                block = new_child(cd, "custom_data")
+                for entry in entries
+                    new_child(block, entry)
+                end
+            end
+            out = ext.custom_data_names(doc)
+            free(doc)
+            return out
+        end
+
+        u, o = vocabulary_from([("default", "0", ["alpha", "beta"]),
+                                ("other", "1", ["alpha", "gamma"])])
+        @test u == Set(["alpha", "beta", "gamma"])
+        @test o == ["alpha", "beta"]
+
+        #! ID="0" qualifies on its own, whatever the definition is called.
+        _, o = vocabulary_from([("tumor", "0", ["alpha"]), ("other", "1", ["beta"])])
+        @test o == ["alpha"]
+
+        #! No cell_defaults at all means nothing to count along, so no positional reference
+        #! resolves -- rather than silently numbering some other definition's list.
+        u, o = vocabulary_from([("first", "1", ["alpha"]), ("second", "2", ["beta"])])
+        @test u == Set(["alpha", "beta"])
+        @test isempty(o)
+
+        #! A rule names a custom-data entry as a signal or behavior, in one of the three
+        #! spellings PhysiCell_signal_behavior.cpp registers.
+        V = (custom_data=Set(["damage_rate", "oncoprotein"]),
+             ordered_custom_data=["damage_rate", "oncoprotein"])
+        K(name) = ext.custom_data_key(name, V)
         @test K("custom:damage_rate") == "damage_rate"
         @test K("custom: damage_rate") == "damage_rate"
+        #! The third form is an INDEX, counted from zero -- not another spelling of the name.
+        @test K("custom 0") == "damage_rate"
+        @test K("custom 1") == "oncoprotein"
+        @test K("custom 2") == ""
+        @test K("custom -1") == ""
+        @test K("custom damage_rate") == ""
+        #! Undeclared, unprefixed, and unparseable all decline rather than guess.
+        @test K("custom:not_declared") == ""
         @test K("damage_rate") == ""
         @test K("oxygen") == ""
+        @test K("custom:") == ""
+        @test K("custom ") == ""
+
         for entry in custom
-            rule_token = "behavior:name:custom:" * entry
-            @test ModelManagerStudio.studio_token_color(sim, :rulesets_collection,
-                ["behavior_ruleset:name:default"], rule_token) == custom_color
+            for spelling in ["custom:" * entry, "custom: " * entry, "custom 0"]
+                @test ModelManagerStudio.studio_token_color(sim, :rulesets_collection,
+                    ["behavior_ruleset:name:default"], "behavior:name:" * spelling) == custom_color
+            end
         end
         #! An undeclared name is not coloured just for carrying the prefix.
         @test isnothing(ModelManagerStudio.studio_token_color(sim, :rulesets_collection,

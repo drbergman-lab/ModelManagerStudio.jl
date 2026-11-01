@@ -1013,17 +1013,10 @@ ApplicationWindow {
                                     TextInput {
                                         id: variationValuesInput
 
-                                        // Why the variation cannot be created right now; "" when it can.
-                                        // So the button's disabled state always has a stated reason, instead
-                                        // of a click that silently does nothing.
-                                        //
-                                        // A binding, not a hand-rolled refresh on `onTextChanged`: that
-                                        // version missed both ends. It never ran before the first keystroke,
-                                        // so the button sat enabled with no target chosen, and it never ran
-                                        // when the TARGET changed, so finishing a parameter chain left the
-                                        // stale "Finish choosing a parameter." in place until the user typed
-                                        // again. The binding re-evaluates on either input, including at
-                                        // creation.
+                                        // Why the variation cannot be created right now; "" when it can,
+                                        // so the Create button's disabled state always has a stated reason.
+                                        // A binding, so it holds from component creation and tracks the
+                                        // target as well as the text.
                                         property string blocker: Julia.variation_blocker(currentVariationTargetText.text, text)
 
                                         anchors.left: parent.left
