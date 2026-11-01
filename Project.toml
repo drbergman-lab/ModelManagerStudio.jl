@@ -17,7 +17,7 @@ Dates = "1"
 Distributions = "0.25.120"
 LightXML = "0.9.1"
 PhysiCellModelManager = "0.2"
-QML = "0.11"
+QML = "0.11, 0.13"
 julia = "1.10"
 
 [extras]
