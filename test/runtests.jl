@@ -356,6 +356,216 @@ createProject()
     end
 
 
+    @testset "Leaf index enumerates every reachable parameter" begin
+        #! Hand-built, so the index is tested against a known document rather than against
+        #! whichever optional input folders happen to be selected.
+        doc = XMLDocument()
+        r = create_root(doc, "root")
+        set_content(new_child(r, "scalar"), "1")
+        grp = new_child(r, "group")
+        for nm in ("x", "y")
+            c = new_child(grp, "item")
+            set_attribute(c, "name", nm)
+            set_content(c, "0")
+        end
+        #! Two same-tag siblings that no attribute tells apart. `retrieveElement` cannot
+        #! follow the token the walk emits for them, so nothing below may be indexed.
+        amb = new_child(r, "ambiguous_parent")
+        set_content(new_child(amb, "same"), "1")
+        set_content(new_child(amb, "same"), "2")
+
+        #! `retrieveElement` tests for "::" BEFORE splitting on ":", and routes such a path
+        #! element to `getChildByChildContent`, which reads a child's content rather than an
+        #! attribute. An attribute value carrying "::" therefore names an element the index
+        #! could follow but the resolved path could not.
+        dc = new_child(r, "double_colon")
+        set_attribute(dc, "name", "Wnt::bcat")
+        set_content(new_child(dc, "rate"), "1")
+        #! " (ambiguous)" is the walker's marker for same-tag siblings no attribute tells
+        #! apart, but it is also something a modeller may legally name a cell type. The marker
+        #! must not be recovered from text that came out of the model file.
+        named = new_child(r, "named")
+        set_attribute(named, "name", "tumor (ambiguous)")
+        set_content(new_child(named, "size"), "1")
+
+        entries = ModelManagerStudio.LeafEntry[]
+        ModelManagerStudio._collect_leaves!(entries, :config, root(doc), String[])
+        chains = [e.chain for e in entries]
+
+        @test ["scalar"] in chains
+        @test ["group", "item:name:x"] in chains
+        @test ["group", "item:name:y"] in chains
+        @test !any(c -> "ambiguous_parent" in c, chains)
+        @test !any(c -> any(t -> contains(t, "::"), c), chains)
+        @test ["named:name:tumor (ambiguous)", "size"] in chains
+        @test all(e -> e.location === :config, entries)
+        #! Every indexed chain must resolve, or a hit would drive the browser nowhere.
+        @test all(c -> !isnothing(MM.retrieveElement(doc, c; required=false)), chains)
+
+        free(doc)
+    end
+
+    @testset "Search normalizes the separators a model spells names with" begin
+        #! The config writes `migration_bias`; a PhysiCell rule writes `migration bias`. One
+        #! query has to reach both, so the index and the query are flattened the same way.
+        @test ModelManagerStudio.search_text(["a_b", "c-d"]) == "a b c d"
+        @test ModelManagerStudio.search_text(["cell_definition:name:CD8+ T cell"]) ==
+              "cell definition name cd8+ t cell"
+        @test ModelManagerStudio.search_words("  migration_bias ") == ["migration", "bias"]
+        @test ModelManagerStudio.search_words("") == String[]
+        @test ModelManagerStudio.search_words("migration_bias") ==
+              ModelManagerStudio.search_words("migration bias")
+    end
+
+    @testset "Search ranks the parameter named over one that repeats the word" begin
+        entry(chain) = ModelManagerStudio.LeafEntry(:config, chain,
+                                                    ModelManagerStudio.search_text(chain))
+        speed = entry(["cell_definition:name:bacteria", "phenotype", "motility", "speed"])
+        halfmax = entry(["cell_definition:name:bacteria", "custom_data", "migration_speed_halfmax"])
+        words = ModelManagerStudio.search_words("bacteria speed")
+
+        @test ModelManagerStudio.match_rank(speed, words) == ModelManagerStudio.RANK_EXACT_TAG
+        @test ModelManagerStudio.match_rank(halfmax, words) == ModelManagerStudio.RANK_TAG_CONTAINS
+        @test ModelManagerStudio.match_rank(speed, words) <
+              ModelManagerStudio.match_rank(halfmax, words)
+
+        #! Order carries meaning -- "cd8 attack bacteria" and "bacteria attack cd8" are two
+        #! different parameters -- but a loose query still places rather than finding nothing.
+        loose = ModelManagerStudio.search_words("speed bacteria")
+        @test ModelManagerStudio.match_rank(speed, loose) == ModelManagerStudio.RANK_ANY_ORDER
+        @test isnothing(ModelManagerStudio.match_rank(speed, ModelManagerStudio.search_words("zzz")))
+        @test isnothing(ModelManagerStudio.match_rank(speed, String[]))
+    end
+
+    @testset "A search hit drives the browser to a real target" begin
+        labels = ModelManagerStudio.search_parameters("max time")
+        @test !isempty(labels)
+        @test any(l -> occursin("overall/max_time", l), labels)
+        @test ModelManagerStudio.search_result_count() >= length(labels)
+        @test length(labels) <= ModelManagerStudio.MAX_SEARCH_RESULTS
+
+        #! QML counts rows from zero and addresses the result by row.
+        row = findfirst(l -> occursin("overall/max_time", l), labels) - 1
+        toks = ModelManagerStudio.search_result_tokens(row)
+        @test toks == ["config", "overall", "max_time"]
+
+        #! The whole point: the chain a hit returns is one the existing resolver accepts.
+        target = ModelManagerStudio.get_target_path(toks[1], toks[2:end]...)
+        @test ModelManagerStudio.is_resolvable_target(target)
+
+        #! Each token must be offered by the level above it, or the ComboBoxes cannot be set.
+        @test toks[2] in ModelManagerStudio.get_next_model(toks[1])
+        @test toks[3] in ModelManagerStudio.get_next_model(toks[1], toks[2])
+
+        #! Out-of-range rows and empty queries are answered, not thrown.
+        @test ModelManagerStudio.search_result_tokens(10_000) == String[]
+        @test ModelManagerStudio.search_result_tokens(-1) == String[]
+        @test ModelManagerStudio.search_parameters("") == String[]
+        @test ModelManagerStudio.search_result_count() == 0
+        @test ModelManagerStudio.search_parameters("zzzz no such parameter") == String[]
+    end
+
+    @testset "Results come back in rank order, not document order" begin
+        #! Ranking is only observable through `search_parameters`, so assert it there: without
+        #! the sort, hits arrive in document order and a deeper entry that merely repeats the
+        #! word can outrank the parameter actually named.
+        ranks = Int[]
+        words = ModelManagerStudio.search_words("rate")
+        for label in ModelManagerStudio.search_parameters("rate")
+            location, path = split(label, ": "; limit=2)
+            chain = String.(split(path, "/"))
+            entry = ModelManagerStudio.LeafEntry(Symbol(location), chain,
+                                                 ModelManagerStudio.search_text(chain))
+            push!(ranks, ModelManagerStudio.match_rank(entry, words))
+        end
+        @test length(ranks) > 1
+        @test issorted(ranks)
+        @test first(ranks) == minimum(ranks)
+    end
+
+    @testset "A truncated result list reports how many actually matched" begin
+        #! `search_result_count` is the whole basis for the "Showing N of M" footer, so it has
+        #! to be the match total and not the length of the capped list.
+        broad = ModelManagerStudio.search_parameters("a")
+        @test length(broad) == ModelManagerStudio.MAX_SEARCH_RESULTS
+        @test ModelManagerStudio.search_result_count() > ModelManagerStudio.MAX_SEARCH_RESULTS
+    end
+
+    @testset "Search spans every varied location, not just the one on screen" begin
+        #! The headline promise: a model's parameters and the rules acting on them live in two
+        #! locations, and one query has to reach both. The suite's default selection varies
+        #! only `config`, so a second varied folder is selected here on purpose.
+        saved = ModelManagerStudio.inputs
+        try
+            ModelManagerStudio.inputs = PhysiCellModelManager.InputFolders(config="0_template",
+                                                                           custom_code="0_template",
+                                                                           rulesets_collection="0_template")
+            ModelManagerStudio.invalidate_base_documents!()
+
+            locations = ModelManagerStudio.searchable_locations()
+            @test :config in locations
+            @test :rulesets_collection in locations
+
+            indexed = filter(l -> !isempty(ModelManagerStudio.leaf_index(l)), locations)
+            @test length(indexed) >= 2
+
+            #! One query, hits from more than one location -- the thing a per-location search
+            #! cannot do. "max" appears in the config's intervals and in a ruleset's half_max.
+            found = Set(Symbol(first(split(l, ": "; limit=2)))
+                        for l in ModelManagerStudio.search_parameters("max"))
+            @test length(found) >= 2
+            @test issubset(found, Set(locations))
+
+            #! And a hit from the non-config location still resolves.
+            rules = [l for l in ModelManagerStudio.search_parameters("max")
+                     if startswith(l, "rulesets_collection: ")]
+            @test !isempty(rules)
+            row = findfirst(==(first(rules)), ModelManagerStudio.search_parameters("max")) - 1
+            toks = ModelManagerStudio.search_result_tokens(row)
+            @test toks[1] == "rulesets_collection"
+            @test ModelManagerStudio.is_resolvable_target(
+                      ModelManagerStudio.get_target_path(toks[1], toks[2:end]...))
+        finally
+            ModelManagerStudio.inputs = saved
+            ModelManagerStudio.invalidate_base_documents!()
+        end
+    end
+
+    @testset "Searchable locations are the varied ones, and every hit resolves" begin
+        @test ModelManagerStudio.searchable_locations() ==
+              Symbol.(ModelManagerStudio.get_varied_locations())
+
+        for location in ModelManagerStudio.searchable_locations()
+            index = ModelManagerStudio.leaf_index(location)
+            @test all(e -> e.location === location, index)
+            @test all(e -> !isempty(e.chain), index)
+            #! A location with a document indexes something; one without indexes nothing.
+            @test isnothing(ModelManagerStudio.base_document(location)) == isempty(index)
+            #! Every indexed chain has to resolve, or a hit drives the browser nowhere.
+            @test all(e -> ModelManagerStudio.is_resolvable_target(
+                               ModelManagerStudio.get_target_path(String(location), e.chain...)), index)
+        end
+    end
+
+    @testset "Leaf indexes are cached and invalidated with the documents" begin
+        first_build = ModelManagerStudio.leaf_index(:config)
+        @test !isempty(first_build)
+        #! Cached by identity: a second call must not rebuild.
+        @test ModelManagerStudio.leaf_index(:config) === first_build
+
+        #! Hits name chains in documents that are about to be re-read, so they go too: a row
+        #! applied after the folders changed would drive the browser to a parameter the new
+        #! model may not have.
+        @test !isempty(ModelManagerStudio.search_parameters("max time"))
+        ModelManagerStudio.invalidate_base_documents!()
+        @test isempty(ModelManagerStudio.LEAF_INDEXES.entries)
+        @test ModelManagerStudio.search_result_tokens(0) == String[]
+        @test ModelManagerStudio.search_result_count() == 0
+        rebuilt = ModelManagerStudio.leaf_index(:config)
+        @test rebuilt !== first_build
+        @test [e.chain for e in rebuilt] == [e.chain for e in first_build]
+    end
+
     @testset "No-folder sentinel is shared with QML" begin
         #! The sentinel used to be a literal on both sides of the Julia/QML boundary. QML now
         #! reads it from project_configuration_properties, so it must actually be published
@@ -707,3 +917,36 @@ createProject()
     end
 
 end
+
+#__PROBE_START__
+let S = ModelManagerStudio
+    function raw_order(query)
+        words = S.search_words(query)
+        scored = Tuple{Int,S.LeafEntry}[]
+        for location in S.searchable_locations()
+            for entry in S.leaf_index(location)
+                rank = S.match_rank(entry, words)
+                isnothing(rank) || push!(scored, (rank, entry))
+            end
+        end
+        return scored
+    end
+    for query in ["default speed", "max time", "speed", "default migration", "default bias"]
+        raw = raw_order(query)
+        sorted = S.search_parameters(query)
+        println("PROBE === query: ", repr(query), "  (", length(raw), " matches)")
+        println("PROBE -- RAW (sort! deleted), first 5 --")
+        for (rank, e) in first(raw, 5)
+            println("PROBE    rank=", rank, "  ", e.location, ": ", join(e.chain, "/"))
+        end
+        println("PROBE -- SORTED (current code), first 5 --")
+        for (i, l) in enumerate(first(sorted, 5))
+            println("PROBE    rank=", S.match_rank(S.last_search_hits[i], S.search_words(query)), "  ", l)
+        end
+        if !isempty(raw)
+            fr = raw[1][1]; best = minimum(t -> t[1], raw)
+            println("PROBE -- raw-first-rank=", fr, " best-rank=", best, fr > best ? "   <<<< INVERSION" : "")
+        end
+    end
+end
+#__PROBE_END__

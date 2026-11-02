@@ -156,12 +156,12 @@ maintain and cannot disagree with itself.
 
 **Cost accepted, and mitigated.** Paths are longer: `speed` is now
 `cell_definitions/cell_definition:name:default/phenotype/motility/speed` rather than
-`default > speed`. The mitigation is **search within a level** — each dropdown opens with a
-filter field, and typing narrows the siblings — not a return to curation.
+`default > speed`. The mitigation is **search**, at two scales, not a return to curation:
+within a level (below) and across the whole project (next section).
 
-Filtering hides delegates rather than replacing `model`. Mutating the model would reset
-`currentIndex` on every keystroke and re-fire the cascade that rebuilds every ComboBox to the
-right of this one, so the chain would churn as the user types.
+Filtering within a level hides delegates rather than replacing `model`. Mutating the model
+would reset `currentIndex` on every keystroke and re-fire the cascade that rebuilds every
+ComboBox to the right of this one, so the chain would churn as the user types.
 
 **Edge cases.**
 - **Ambiguous siblings.** When no attribute uniquely identifies siblings, the walker emits
@@ -169,6 +169,55 @@ right of this one, so the chain would churn as the user types.
 - **Unselected or unknown location.** Yields `String[]`, never `nothing` and never a throw —
   `prepareBaseFile` asserts from inside the simulator's dependencies for an unselected folder.
 - **Attribute values containing `/`** would break the `columnName` round trip, which joins on `/`.
+
+## Feature: Parameter search — **implemented**
+
+**Behavior.** A search field above the browser takes a few words and lists matching parameters
+from every varied location. Picking one sets the location dropdown and every token ComboBox to
+that parameter's chain, exactly as if it had been walked to.
+
+**No new seam.** The index is built from `get_next_xml_path_elements` — the same walk that fills
+the dropdowns — so a hit is always a chain the browser can be driven to and `MM.XMLPath` can
+resolve. Backends contribute nothing and can break nothing.
+
+**Acceptance criteria.**
+- The index holds one entry per leaf: location, token chain, and normalized match text.
+- Built on first search, per location, and cached beside the base document under the same folder
+  key, so it goes stale at exactly the moment the document does.
+- Search covers every location in `get_varied_locations()`, not only the one on screen.
+- Separators are flattened (`_`, `-`, `:`, `/` → space, lowercased) in both index and query, so
+  one query reaches a name the model spells two ways — the config writes `migration_bias` where
+  a PhysiCell rule writes `migration bias`.
+- Ranked: a hit whose own tag *is* the last word typed, then one that contains it, then any
+  in-order match, then any-order. Ties break on shallower path, then shorter.
+- Order carries meaning — in `interactions`, `cd8 attack bacteria` and `bacteria attack cd8` are
+  two different parameters — but a loosely ordered query still places rather than finding nothing.
+- Capped at `MAX_SEARCH_RESULTS` (50), and a truncated list says how many matched in all.
+- Applying a hit drives the location dropdown first, then each ComboBox in turn, calling
+  `updateNextComboBox` explicitly after each: assigning an unchanged `currentIndex` emits no
+  signal, so the cascade cannot be relied on to have run.
+
+**Transcript.** Search only moves the browser. The variation it leads to is recorded by the
+existing `create_variation` path, so Fixed Constraint 2 needs nothing new.
+
+**Edge cases.**
+- **A token the resolver cannot follow** is skipped along with its whole subtree. The test is
+  structural, not textual: `_child_for_token` makes `retrieveElement`'s own two decisions in the
+  same order, so anything it cannot resolve is never indexed. This covers ambiguous siblings
+  (`"<tag> (ambiguous)"` matches no tag) without ever reading the marker back out of a token,
+  which would drop a cell definition a modeller happened to name `tumor (ambiguous)`.
+- **`::` in an attribute value** (a `Wnt::bcat` substrate) is not indexed: `retrieveElement`
+  tests for `::` *before* splitting on `:` and routes those to `getChildByChildContent`, which
+  reads a child's content rather than an attribute, so the chain would not resolve.
+- **Empty query** returns no results and a count of zero, rather than every parameter.
+- **A stale row** — the folders changed since the list was drawn — returns `String[]`. Both
+  staleness routes clear the hits: the explicit `invalidate_base_documents!`, and
+  `base_document`'s own per-location re-read on a folder mismatch.
+- **A location with no readable document** indexes nothing and is simply absent from results.
+
+**Not covered by tests.** The QML half — `applyResult`, `runSearch`, the result delegate — is
+never instantiated by the suite, which only loads the file. A broken identifier in those
+functions passes CI, including under `QT_FATAL_WARNINGS=1`.
 
 ## Feature: Variation values — **implemented; parser required**
 

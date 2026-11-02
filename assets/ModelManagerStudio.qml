@@ -420,6 +420,9 @@ ApplicationWindow {
                             inputsPlaceholderText.visible = false;
                             inputsDisplay.visible = true;
                             variedLocationComboBox.model = Julia.get_varied_locations();
+                            // Julia dropped the hits behind these rows when the folders
+                            // changed, so a list left on screen is rows that apply to nothing.
+                            parameterSearchRow.clearSearch();
                             currentVariationTargetText.updateVariationTarget(); // Update the target text
                             if (runSimulationButton.enabled === false) {
                                 runSimulationButton.enabled = true; // Enable the run simulation button
@@ -636,6 +639,189 @@ ApplicationWindow {
                             anchors.top: parent.top
                             anchors.margins: parent.padding
 
+                            // Jump straight to a parameter by name, across every location
+                            // that supports variation. The walk below produces honest but deep
+                            // paths; this is how you get to the bottom of one without clicking
+                            // through every level of it.
+                            RowLayout {
+                                id: parameterSearchRow
+
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                // Drives the location dropdown and then each token ComboBox in
+                                // turn, so a jump lands on exactly the state a hand-walked chain
+                                // would have produced.
+                                function applyResult(row) {
+                                    let toks = Julia.search_result_tokens(row);
+                                    if (toks.length < 2)
+                                        return ;
+
+                                    let locationIndex = -1;
+                                    for (let k = 0; k < variedLocationComboBox.model.length; ++k) {
+                                        if (variedLocationComboBox.model[k] === toks[0]) {
+                                            locationIndex = k;
+                                            break;
+                                        }
+                                    }
+                                    if (locationIndex < 0)
+                                        return ;
+
+                                    variedLocationComboBox.currentIndex = locationIndex;
+                                    // Assigning an unchanged currentIndex emits nothing, so the
+                                    // cascade cannot be relied on to have run. Seed the first
+                                    // level, then force each next one after setting its parent.
+                                    tokenComboBoxRepeater.itemAt(0).model = Julia.get_next_model(toks[0]);
+                                    for (let d = 1; d < toks.length; ++d) {
+                                        let combo = tokenComboBoxRepeater.itemAt(d - 1);
+                                        let tokenIndex = -1;
+                                        for (let k = 0; k < combo.model.length; ++k) {
+                                            if (combo.model[k] === toks[d]) {
+                                                tokenIndex = k;
+                                                break;
+                                            }
+                                        }
+                                        if (tokenIndex < 0)
+                                            return ;
+
+                                        combo.currentIndex = tokenIndex;
+                                        combo.updateNextComboBox();
+                                    }
+                                    // The parameter itself is the rightmost box, which is
+                                    // off-screen for any chain wider than the window -- so a
+                                    // jump that does not scroll lands out of sight.
+                                    Qt.callLater(parameterSearchRow.revealChainEnd);
+                                    // Deferred: this runs from the clicked delegate's own
+                                    // handler, and clearing the field empties the list model
+                                    // that delegate belongs to.
+                                    Qt.callLater(parameterSearchRow.clearSearch);
+                                }
+
+                                function clearSearch() {
+                                    searchResultsPopup.close();
+                                    parameterSearchField.text = "";
+                                }
+
+                                function revealChainEnd() {
+                                    let overflow = comboFlickable.contentWidth - comboFlickable.width;
+                                    comboFlickable.contentX = overflow > 0 ? overflow : 0;
+                                }
+
+                                TextField {
+                                    id: parameterSearchField
+
+                                    Layout.fillWidth: true
+                                    placeholderText: "Find a parameter\u2026  e.g. \"bacteria speed\""
+                                    font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                                    selectByMouse: true
+
+                                    function runSearch() {
+                                        if (text === "") {
+                                            searchResultsPopup.close();
+                                            searchResultsList.model = [];
+                                            return ;
+                                        }
+                                        searchResultsList.model = Julia.search_parameters(text);
+                                        searchResultsPopup.total = Julia.search_result_count();
+                                        searchResultsList.currentIndex = 0;
+                                        if (searchResultsList.model.length > 0)
+                                            searchResultsPopup.open();
+                                        else
+                                            searchResultsPopup.close();
+                                    }
+
+                                    onTextChanged: runSearch()
+                                    // The popup never takes focus, so the keys that move through
+                                    // it and pick from it are handled here.
+                                    Keys.onDownPressed: {
+                                        if (searchResultsList.currentIndex < searchResultsList.model.length - 1)
+                                            searchResultsList.currentIndex += 1;
+
+                                    }
+                                    Keys.onUpPressed: {
+                                        if (searchResultsList.currentIndex > 0)
+                                            searchResultsList.currentIndex -= 1;
+
+                                    }
+                                    Keys.onReturnPressed: {
+                                        if (searchResultsList.model.length > 0)
+                                            parameterSearchRow.applyResult(searchResultsList.currentIndex);
+
+                                    }
+                                    Keys.onEscapePressed: searchResultsPopup.close()
+
+                                    Popup {
+                                        id: searchResultsPopup
+
+                                        // Matches before the display cap, so a list that was
+                                        // truncated says so instead of looking complete.
+                                        property int total: 0
+
+                                        y: parameterSearchField.height
+                                        width: parameterSearchField.width
+                                        padding: 1
+                                        // The popup never takes focus, so the caret stays in the
+                                        // field and the arrow keys keep reaching it. It still has
+                                        // to be dismissable by clicking away, or a list left open
+                                        // covers the browser underneath it.
+                                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                                        // Dismissing has to disarm the keys too. The Return
+                                        // handler fires on whatever the list still holds, so a
+                                        // list left populated behind a closed popup would let
+                                        // Return rewrite the whole chain from an invisible
+                                        // selection.
+                                        onClosed: searchResultsList.model = []
+
+                                        contentItem: ColumnLayout {
+                                            spacing: 0
+
+                                            ListView {
+                                                id: searchResultsList
+
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: Math.min(contentHeight, 320)
+                                                clip: true
+                                                model: []
+                                                boundsBehavior: Flickable.StopAtBounds
+
+                                                delegate: ItemDelegate {
+                                                    width: ListView.view ? ListView.view.width : implicitWidth
+                                                    highlighted: ListView.isCurrentItem
+                                                    onClicked: parameterSearchRow.applyResult(index)
+
+                                                    contentItem: Text {
+                                                        text: modelData
+                                                        color: syscolors.text
+                                                        font.pixelSize: mainWindow.fontSizeOfLevel[3]
+                                                        elide: Text.ElideLeft
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+
+                                                }
+
+                                                ScrollIndicator.vertical: ScrollIndicator {
+                                                }
+
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                Layout.margins: 6
+                                                visible: searchResultsPopup.total > searchResultsList.model.length
+                                                text: "Showing " + searchResultsList.model.length + " of " + searchResultsPopup.total + " \u2014 narrow the search"
+                                                color: mainWindow.unusedTextColor
+                                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                font.italic: true
+                                            }
+
+                                        }
+
+                                    }
+
+                                }
+
+                            }
+
                             RowLayout {
                                 id: variationRowLayout
 
@@ -662,6 +848,8 @@ ApplicationWindow {
                                 }
 
                                 Flickable {
+                                    id: comboFlickable
+
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     contentWidth: comboRow.implicitWidth

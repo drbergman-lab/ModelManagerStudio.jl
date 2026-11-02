@@ -28,7 +28,8 @@ const BASE_DOCUMENTS = BaseDocumentCache()
 """
     invalidate_base_documents!()
 
-Free every cached document and forget it. Called whenever the input folders change.
+Free every cached document and forget it, along with the leaf indexes built from them. Called
+whenever the input folders change.
 """
 function invalidate_base_documents!()
     for (_, doc) in BASE_DOCUMENTS.docs
@@ -40,6 +41,7 @@ function invalidate_base_documents!()
     end
     empty!(BASE_DOCUMENTS.docs)
     empty!(BASE_DOCUMENTS.folders)
+    invalidate_leaf_indexes!()
     return nothing
 end
 

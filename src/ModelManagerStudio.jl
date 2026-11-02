@@ -32,6 +32,7 @@ export launch, main
 include("backend.jl")
 include("colors.jl")
 include("base_documents.jl")
+include("leaf_index.jl")
 include("value_parser.jl")
 include("record.jl")
 #! Unconditional: main.jl itself chooses between the `@main` entrypoint (1.11+) and a plain
@@ -97,6 +98,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     @qmlfunction delete_variation clear_variations
     @qmlfunction value_spec_error variation_blocker allowed_distribution_names
     @qmlfunction run_simulation location_label is_varied_location
+    @qmlfunction search_parameters search_result_tokens search_result_count
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
@@ -209,6 +211,11 @@ end
 #! ModelManager's own `recurseToGetParameterValues!` ("name", "ID", "id"), so a browser token
 #! matches the column name MM gives the same parameter, plus "type" for the IC files.
 const ID_ATTRIBUTES = ["name", "ID", "id", "type"]
+
+#! Marks a token standing for several same-tag siblings that no attribute tells apart. Such a
+#! token cannot be resolved by `retrieveElement`, so the leaf index skips it; defined here,
+#! beside the code that emits it, so the two cannot drift.
+const AMBIGUOUS_TOKEN_SUFFIX = " (ambiguous)"
 
 """
     get_tokens(location, previous_tokens)
@@ -328,7 +335,55 @@ function get_token_kinds(tokens::Vararg{AbstractString})
     end
 end
 
+#! How many hits the search box offers at once. Past this the list stops being something to
+#! read and starts being something to scroll, and the right move is a narrower query.
+const MAX_SEARCH_RESULTS = 50
 
+#! The hits behind the labels last handed to QML. QML addresses a result by its row, so the
+#! rows have to stay addressable between `search_parameters` and `search_result_tokens`.
+global last_search_hits = LeafEntry[]
+global last_search_total = 0
+
+"""
+    search_parameters(query::AbstractString)
+
+Display labels for the parameters matching `query`, best first. Called from QML.
+
+A label is `"<location>: <path>"`. Use [`search_result_tokens`](@ref) to turn a row back into
+the chain that drives the browser, and [`search_result_count`](@ref) for how many matched in
+all — the list is capped at `$(MAX_SEARCH_RESULTS)`, so it can be shorter than the count.
+"""
+function search_parameters(query::AbstractString)
+    global last_search_hits, last_search_total
+    hits, total = search_leaves(String(query))
+    last_search_hits = hits
+    last_search_total = total
+    return ["$(e.location): $(join(e.chain, "/"))" for e in hits]
+end
+
+"""
+    search_result_count()
+
+How many parameters the last [`search_parameters`](@ref) matched, before the display cap.
+Called from QML.
+"""
+search_result_count() = last_search_total
+
+"""
+    search_result_tokens(index::Real)
+
+The location followed by the token chain for row `index` (0-based, as QML counts) of the last
+[`search_parameters`](@ref); `String[]` if that row no longer exists. Called from QML.
+
+Returning the location in the same vector keeps the browser's two controls — the location
+dropdown and the token chain — set from one call, so they cannot be left disagreeing.
+"""
+function search_result_tokens(index::Real)
+    i = Int(index) + 1
+    checkbounds(Bool, last_search_hits, i) || return String[]
+    entry = last_search_hits[i]
+    return [String(entry.location); entry.chain]
+end
 
 
 
@@ -368,7 +423,7 @@ function get_next_xml_path_elements(e::XMLElement, id_attributes::Vector{String}
             end
         end
         if unique_attribute == ""
-            push!(out, "$(tag) (ambiguous)")
+            push!(out, "$(tag)$(AMBIGUOUS_TOKEN_SUFFIX)")
         else
             #! Three parts, not two. `ModelManager.retrieveElement` splits a token on ":"
             #! with `limit=3` and `getChildByAttribute` destructures exactly three values,

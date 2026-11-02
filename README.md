@@ -19,6 +19,7 @@ Every simulation campaign starts the same way: choose input folders, decide whic
 | You want to… | The GUI gives you |
 |---|---|
 | find a parameter without knowing its XML path | a cascading browser over the model's own structure |
+| find it without clicking through the whole path | a search box — type `bacteria speed`, land on it |
 | vary it | a value editor for discrete sets, ranges, and distributions |
 | run the campaign | a run button, with the project's parallelism settings honored |
 | reproduce the session later | a replayable `.jl` transcript written as you work |
