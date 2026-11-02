@@ -740,10 +740,14 @@ ApplicationWindow {
                                         searchResultsList.model = Julia.search_parameters(text);
                                         searchResultsPopup.total = Julia.search_result_count();
                                         searchResultsList.currentIndex = 0;
-                                        if (searchResultsList.model.length > 0)
-                                            searchResultsPopup.open();
-                                        else
-                                            searchResultsPopup.close();
+                                        // Name the locations actually searched when nothing
+                                        // matched. An unselected folder is the usual reason a
+                                        // parameter cannot be found, and it is otherwise
+                                        // invisible: the location is simply missing from a list
+                                        // the user never sees.
+                                        searchResultsPopup.scope = searchResultsList.model.length > 0
+                                            ? "" : Julia.search_scope().join(", ");
+                                        searchResultsPopup.open();
                                     }
 
                                     onTextChanged: runSearch()
@@ -772,6 +776,8 @@ ApplicationWindow {
                                         // Matches before the display cap, so a list that was
                                         // truncated says so instead of looking complete.
                                         property int total: 0
+                                        // Locations searched, listed only when nothing matched.
+                                        property string scope: ""
 
                                         y: parameterSearchField.height
                                         width: parameterSearchField.width
@@ -823,7 +829,20 @@ ApplicationWindow {
                                             Text {
                                                 Layout.fillWidth: true
                                                 Layout.margins: 6
-                                                visible: searchResultsPopup.total > searchResultsList.model.length
+                                                visible: searchResultsList.model.length === 0
+                                                wrapMode: Text.Wrap
+                                                text: searchResultsPopup.scope === ""
+                                                    ? "No match. No location has a folder to search \u2014 create inputs first."
+                                                    : "No match in " + searchResultsPopup.scope + ". A location with no folder chosen is not searched."
+                                                color: mainWindow.unusedTextColor
+                                                font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                                font.italic: true
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                Layout.margins: 6
+                                                visible: searchResultsPopup.total > searchResultsList.model.length && searchResultsList.model.length > 0
                                                 text: "Showing " + searchResultsList.model.length + " of " + searchResultsPopup.total + " \u2014 narrow the search"
                                                 color: mainWindow.unusedTextColor
                                                 font.pixelSize: mainWindow.fontSizeOfLevel[4]

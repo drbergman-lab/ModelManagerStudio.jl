@@ -531,6 +531,20 @@ createProject()
         @test ModelManagerStudio.search_result_count() > ModelManagerStudio.MAX_SEARCH_RESULTS
     end
 
+    @testset "An empty result names the locations it did search" begin
+        #! An unselected folder is the usual reason a parameter cannot be found, and it is
+        #! otherwise invisible -- the location is simply missing from a list no one sees.
+        scope = ModelManagerStudio.search_scope()
+        @test "config" in scope
+        @test all(l -> !isempty(ModelManagerStudio.leaf_index(Symbol(l))), scope)
+        #! A location in the dropdown but with no folder chosen contributes nothing, so it must
+        #! not be claimed as searched.
+        for l in ModelManagerStudio.get_varied_locations()
+            isnothing(ModelManagerStudio.base_document(Symbol(l))) || continue
+            @test !(l in scope)
+        end
+    end
+
     @testset "Search spans every varied location, not just the one on screen" begin
         #! The headline promise: a model's parameters and the rules acting on them live in two
         #! locations, and one query has to reach both. The suite's default selection varies

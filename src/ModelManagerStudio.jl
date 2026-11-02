@@ -98,7 +98,7 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
     @qmlfunction delete_variation clear_variations
     @qmlfunction value_spec_error variation_blocker allowed_distribution_names
     @qmlfunction run_simulation location_label is_varied_location
-    @qmlfunction search_parameters search_result_tokens search_result_count
+    @qmlfunction search_parameters search_result_tokens search_result_count search_scope
 
     # absolute path in case working dir is overridden
     qml_file = joinpath(@__DIR__, "..", "assets", "ModelManagerStudio.qml")
@@ -360,6 +360,17 @@ function search_parameters(query::AbstractString)
     last_search_total = total
     return ["$(e.location): $(join(e.chain, "/"))" for e in hits]
 end
+
+"""
+    search_scope()
+
+The locations a search can currently reach: those with a readable base document. Called from
+QML to explain an empty result list.
+
+An unselected folder is the usual reason a parameter cannot be found, and nothing else in the
+GUI says so — the location is simply absent from a list the user never sees.
+"""
+search_scope() = [String(l) for l in searchable_locations() if !isempty(leaf_index(l))]
 
 """
     search_result_count()
