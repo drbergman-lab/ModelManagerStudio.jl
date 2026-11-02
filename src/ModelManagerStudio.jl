@@ -19,7 +19,8 @@ using ModelManager
 
 #! Imported by the backend extensions, which add methods to these.
 @compat public studio_open_project, studio_transcript_preamble, studio_no_project_message,
-               studio_token_color, studio_project_is_open, token_name
+               studio_token_color, studio_validate_inputs, studio_project_is_open,
+               token_name, with_base_document
 
 #! `launch` is the package's entire purpose, so it is exported. The previous arrangement was
 #! backwards: `main` (which a user never calls interactively) was exported while `launch`
@@ -92,7 +93,8 @@ function init_model_manager_gui(args::Vararg{AbstractString}; kwargs...)
 
     #! Every name here must exist; `@qmlfunction` on a deleted one is an UndefVarError at
     #! launch, from inside the macro, which is how the removed vocabulary helpers showed up.
-    @qmlfunction get_folders set_input_folders get_input_folder get_varied_locations
+    @qmlfunction get_folders set_input_folders commit_input_folders get_input_folder
+    @qmlfunction get_varied_locations
     @qmlfunction get_next_model get_token_kinds get_token_colors get_target_path is_resolvable_target
     @qmlfunction create_variation get_current_variations variation_exists
     @qmlfunction delete_variation clear_variations
@@ -156,22 +158,101 @@ function get_folders(location::AbstractString, required::Bool)
     return out
 end
 
+"""
+    set_input_folders()
+
+Commit the current dropdown selection, unless the backend has something to say about it.
+
+Returns the backend's problems with the selection and commits nothing when there are any, so
+the GUI can put them to the user first. `String[]` means it committed. Called from QML.
+
+Nothing is created on the way out: the candidate `InputFolders` is built to be read and then
+dropped, so a selection the user declines leaves `inputs` exactly as it was — unset if it was
+never set, and the previous selection if it was. Building one writes nothing; its only database
+access is a lookup of the folder's ID.
+"""
 function set_input_folders()
-    global current_required_locations, current_optional_locations, inputs
+    candidate = _candidate_inputs()
+    problems = validate_inputs(candidate)
+    isempty(problems) || return problems
+    _commit_inputs!(candidate, problems)
+    return String[]
+end
+
+"""
+    commit_input_folders()
+
+Commit the current selection despite the backend's objections — the GUI's "Create anyway".
+Called from QML.
+
+Validation runs again rather than reusing what the dialog was built from, so the transcript
+records the problems as they are at the moment of the call and not as they were when some
+earlier pass happened to see them.
+"""
+function commit_input_folders()
+    candidate = _candidate_inputs()
+    _commit_inputs!(candidate, validate_inputs(candidate))
+    return nothing
+end
+
+"""
+    _candidate_inputs()
+
+An `InputFolders` for the current dropdown selection, committed to nothing.
+"""
+function _candidate_inputs()
+    global current_required_locations, current_optional_locations
 
     kwargs = Dict{Symbol, String}()
     for loc in current_required_locations ∪ current_optional_locations
         kwargs[Symbol(loc.location)] = loc.folder == NO_FOLDER_SENTINEL ? "" : loc.folder
     end
+    return InputFolders(; kwargs...)
+end
 
-    inputs = InputFolders(; kwargs...)
+"""
+    _commit_inputs!(candidate, problems)
+
+Adopt `candidate` as the project's input folders and record it, carrying `problems` into the
+transcript so a replayed script warns about the same thing.
+"""
+function _commit_inputs!(candidate::InputFolders, problems::Vector{String})
+    global inputs
+    inputs = candidate
 
     #! Documents cached against the previous selection are now stale.
     invalidate_base_documents!()
 
     model_manager_studio_info(string(inputs))
+    for problem in problems
+        model_manager_studio_warn(problem)
+    end
 
-    record_inputs()
+    record_inputs(problems)
+    return nothing
+end
+
+"""
+    validate_inputs(candidate::InputFolders)
+
+The backend's problems with `candidate`, as plain-language sentences.
+
+Never throws and never refuses: a backend that blows up inside its own validation is a bug in
+the backend, and blocking the user's project on it would be the worse failure. The error is
+logged and the selection treated as unobjectionable.
+"""
+validate_inputs(candidate::InputFolders) = validate_inputs(studio_backend(), candidate)
+
+validate_inputs(::Nothing, ::InputFolders) = String[]
+
+function validate_inputs(sim, candidate::InputFolders)
+    raw = try
+        studio_validate_inputs(sim, candidate)
+    catch e
+        model_manager_studio_debug("studio_validate_inputs failed: $(sprint(showerror, e))")
+        return String[]
+    end
+    return [String(p) for p in raw if !isempty(strip(String(p)))]
 end
 
 function get_input_folder(location::AbstractString)

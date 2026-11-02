@@ -33,7 +33,7 @@ function initialize_record()
     last_record = :initialize
 end
 
-function record_inputs()
+function record_inputs(problems::Vector{String}=String[])
     global path_to_record, last_record, inputs
     pl = MM.projectLocations()
     required_args = join(["\"$(inputs[location].folder)\"" for location in pl.required], ", ")
@@ -42,9 +42,14 @@ function record_inputs()
     optional_args = isempty(included_optional_locs) ? "" :
                     ";\n\t" * join(["$location=\"$(inputs[location].folder)\"" for location in included_optional_locs], ",\n\t")
 
+    #! Carried into the script so a replay warns about the same thing. The user chose to go
+    #! ahead in the GUI; a transcript that silently dropped the reason would make the script a
+    #! less faithful record of the session than the session was.
+    warnings = join(["@warn \"\"\"$(p)\"\"\"\n" for p in problems])
+
     msg = """
     $(inputs_marker())
-    inputs = InputFolders(
+    $(warnings)inputs = InputFolders(
         $required_args$optional_args
     )\n
     """

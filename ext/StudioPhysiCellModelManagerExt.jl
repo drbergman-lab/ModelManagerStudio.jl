@@ -216,4 +216,54 @@ function declared_names(doc::XMLDocument, parent_path::Vector{String}, tag::Abst
     return out
 end
 
+"""
+    MMS.studio_validate_inputs(::PhysiCellSimulator, inputs)
+
+Report behavior rulesets naming a cell definition the config does not declare.
+
+PhysiCell applies a ruleset by cell type name. A ruleset whose name matches nothing in
+`cell_definitions` is not an error anywhere in the stack — the simulation builds, runs, and
+simply never applies those rules — so the first sign of it is output that does not respond to
+the parameter the user came to vary.
+
+Only reported when both documents are readable; an unselected rulesets folder has no rules to
+be wrong about, and a config that will not parse is a bigger problem than this one.
+"""
+function MMS.studio_validate_inputs(::PhysiCellSimulator, inputs::MM.InputFolders)
+    cell_definitions = MMS.with_base_document(inputs, :config) do doc
+        declared_names(doc, ["cell_definitions"], "cell_definition")
+    end
+    isnothing(cell_definitions) && return String[]
+
+    ruleset_names = MMS.with_base_document(inputs, :rulesets_collection) do doc
+        declared_names(doc, String[], "behavior_ruleset")
+    end
+    isnothing(ruleset_names) && return String[]
+
+    return orphan_ruleset_problems(ruleset_names, cell_definitions)
+end
+
+"""
+    orphan_ruleset_problems(ruleset_names, cell_definitions)
+
+The problems to report for rulesets naming a cell type `cell_definitions` does not contain.
+
+Separate from the document reading so the comparison, which is the part with a right answer,
+can be tested without a project on disk holding a deliberately broken ruleset.
+"""
+function orphan_ruleset_problems(ruleset_names, cell_definitions)
+    orphans = sort!(collect(setdiff(ruleset_names, cell_definitions)))
+    isempty(orphans) && return String[]
+
+    declared = isempty(cell_definitions) ? "none" :
+               join(sort!(collect(cell_definitions)), ", ")
+    subject = length(orphans) == 1 ? "A behavior ruleset names" :
+              "$(length(orphans)) behavior rulesets name"
+    return ["""
+            $(subject) a cell type the config does not declare: $(join(orphans, ", ")).
+
+            PhysiCell will run this and silently apply no rules to them.
+
+            Cell types in the config: $(declared)."""]
+end
 end # module

@@ -124,6 +124,46 @@ there rather than in a user's hands.
 
 ---
 
+## Feature: Input validation — **implemented**
+
+**Behavior.** Create Inputs asks the backend whether this combination of folders makes sense
+before committing it. Nothing to say → the inputs are created as before. Problems → a modal
+lists them, and the user chooses: create anyway, or cancel and change the selection.
+
+**A warning, never a gate.** The backend reports; the user decides. `studio_validate_inputs`
+returns `Vector{String}` — one plain-language sentence per problem — because the GUI only ever
+renders them, and a backend with two things to say should not have to pick one.
+
+**Cancel creates nothing.** Validation runs against a *candidate* `InputFolders` that is built
+to be read and then dropped. Building one writes nothing (its only database access is a lookup
+of the folder's ID), so declining leaves `inputs` exactly as it was — unset if it was never set,
+and the previous selection if it was. Variations and search stay unavailable, which is the point.
+
+**Acceptance criteria.**
+- `studio_validate_inputs(sim, inputs)` returns `String[]` by default; the backend overrides it.
+- Create Inputs commits nothing when the result is non-empty; the GUI shows it and asks.
+- Cancel leaves the dropdown selections alone and `inputs` untouched.
+- Blank and whitespace-only entries are dropped rather than rendered as empty dialog rows.
+- A backend that throws inside validation is logged and treated as having no objection.
+  Blocking a project on a bug in the backend's validator is the worse failure.
+- The transcript carries each accepted problem as a `@warn` immediately above the
+  `InputFolders(...)` call, so a replayed script warns about the same thing (Fixed Constraint 2).
+- Documents are read with `with_base_document`, which parses and frees around the call, so a
+  validation pass cannot leak a libxml2 document.
+
+**PhysiCell's check.** A `behavior_ruleset` naming a cell type the config does not declare.
+PhysiCell applies rulesets by cell type name and silently applies none when the name matches
+nothing, so the first sign is output that does not respond to the parameter being varied. The
+message names the orphans *and* what the config does declare, since otherwise a typo and a
+genuinely missing cell type read identically.
+
+**Edge cases.**
+- **No rulesets folder** — nothing to be wrong about; reports nothing.
+- **An unreadable config** is a bigger problem than this one; reports nothing.
+- **No backend loaded** — no objection.
+- **Inputs already created.** Re-running Create Inputs and cancelling is a no-op: the previous
+  selection stands. Nothing is torn down.
+
 ## Feature: Parameter browser — **implemented as a generic XML walk**
 
 **Behavior.** After choosing a varied location, the user narrows through a chain of dropdowns

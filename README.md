@@ -44,9 +44,10 @@ launch("path/to/project")
 | [PhysiCellModelManager.jl](https://github.com/drbergman-lab/PhysiCellModelManager.jl) | supported, via `StudioPhysiCellModelManagerExt` |
 | Any other `ModelManager.AbstractSimulator` | works on the generic defaults; add an extension for its project layout |
 
-A backend extension supplies four things: where its projects live on disk, what a reproducible
-script says to reopen one, how to point a lost user at its project-creation function, and which
-tokens in the parameter browser name something in the user's model. The browser's *walk* needs
+A backend extension supplies five things: where its projects live on disk, what a reproducible
+script says to reopen one, how to point a lost user at its project-creation function, which
+tokens in the parameter browser name something in the user's model, and whether a chosen
+combination of input folders makes sense together. The browser's *walk* needs
 nothing — it reads the location's base XML — but the XML cannot say which of its elements a
 modeller thinks of as a group, so the colours come from the backend.
 

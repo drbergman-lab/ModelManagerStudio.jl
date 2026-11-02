@@ -18,6 +18,17 @@ function ModelManagerStudio.studio_token_color(probe::ColorProbe, ::Symbol,
     return probe.answer
 end
 
+#! A stand-in backend for the input-validation seam: it says whatever it is told to, so the
+#! core's handling of a backend's objections can be tested without one that misbehaves on purpose.
+struct ValidationProbe <: MM.AbstractSimulator
+    answer::Any
+end
+
+function ModelManagerStudio.studio_validate_inputs(probe::ValidationProbe, ::MM.InputFolders)
+    probe.answer === :throw && error("validator blew up")
+    return probe.answer
+end
+
 createProject()
 
 @testset "ModelManagerStudio.jl" begin
@@ -618,6 +629,113 @@ createProject()
         rebuilt = ModelManagerStudio.leaf_index(:config)
         @test rebuilt !== first_build
         @test [e.chain for e in rebuilt] == [e.chain for e in first_build]
+    end
+
+    @testset "A backend's objections are reported, never enforced" begin
+        candidate = ModelManagerStudio._candidate_inputs()
+
+        @test ModelManagerStudio.validate_inputs(candidate) isa Vector{String}
+        probe = ValidationProbe(["rules name a cell type the config lacks"])
+        @test ModelManagerStudio.validate_inputs(probe, candidate) ==
+              ["rules name a cell type the config lacks"]
+
+        #! Blank entries are dropped rather than shown as an empty line in the dialog.
+        @test ModelManagerStudio.validate_inputs(ValidationProbe(["", "   ", "real"]), candidate) ==
+              ["real"]
+        @test ModelManagerStudio.validate_inputs(ValidationProbe(String[]), candidate) == String[]
+
+        #! A validator that blows up is a bug in the backend. Blocking the user's project on it
+        #! would be the worse failure, so it is logged and the selection treated as fine.
+        @test ModelManagerStudio.validate_inputs(ValidationProbe(:throw), candidate) == String[]
+
+        #! No backend at all is not an objection either.
+        @test ModelManagerStudio.validate_inputs(nothing, candidate) == String[]
+    end
+
+    @testset "A candidate selection commits nothing until it is accepted" begin
+        saved = ModelManagerStudio.inputs
+
+        #! Building one must not write: its only database access is a lookup of the folder ID.
+        before = ModelManagerStudio._candidate_inputs()
+        @test ModelManagerStudio._candidate_inputs() == before
+        @test ModelManagerStudio.inputs === saved
+
+        ModelManagerStudio.inputs = saved
+    end
+
+    @testset "The transcript carries the warnings the user went ahead past" begin
+        #! Fixed Constraint 2: the action has to be expressible in the recorded script, and the
+        #! user accepted a warning, so a replay has to warn about the same thing.
+        ModelManagerStudio.record_inputs(["ruleset \"ghost\" names no cell definition"])
+        recorded = read(ModelManagerStudio.path_to_record, String)
+        @test occursin("@warn", recorded)
+        @test occursin("ghost", recorded)
+        @test occursin("InputFolders(", recorded)
+        #! The warning precedes the call it is about. Anchored on the last of each: the
+        #! transcript's preamble mentions InputFolders too.
+        @test findlast("@warn", recorded)[1] < findlast("inputs = InputFolders(", recorded)[1]
+
+        #! And a clean selection records no warning at all.
+        ModelManagerStudio.record_inputs()
+        clean = read(ModelManagerStudio.path_to_record, String)
+        @test !occursin("@warn", clean)
+        @test occursin("InputFolders(", clean)
+    end
+
+    @testset "with_base_document reads an uncommitted selection and frees it" begin
+        candidate = ModelManagerStudio._candidate_inputs()
+        tag = ModelManagerStudio.with_base_document(candidate, :config) do doc
+            LightXML.name(root(doc))
+        end
+        @test tag == "PhysiCell_settings"
+
+        #! Unselected, unknown and unreadable locations come back as nothing, never a throw --
+        #! this runs inside a GUI callback.
+        @test isnothing(ModelManagerStudio.with_base_document(candidate, :not_a_location) do doc
+            error("must not be called")
+        end)
+        bare = PhysiCellModelManager.InputFolders(config="0_template", custom_code="0_template")
+        @test isnothing(ModelManagerStudio.with_base_document(bare, :rulesets_collection) do doc
+            error("must not be called")
+        end)
+    end
+
+    @testset "PhysiCell flags rulesets that name no cell definition" begin
+        ext = Base.get_extension(ModelManagerStudio, :StudioPhysiCellModelManagerExt)
+        @test !isnothing(ext)
+        sim = ModelManagerStudio.studio_backend()
+
+        #! The template's ruleset and its cell definitions agree, so there is nothing to say.
+        with_rules = PhysiCellModelManager.InputFolders(config="0_template",
+                                                        custom_code="0_template",
+                                                        rulesets_collection="0_template")
+        @test ModelManagerStudio.studio_validate_inputs(sim, with_rules) == String[]
+
+        #! No rulesets folder means no rules to be wrong about.
+        without_rules = PhysiCellModelManager.InputFolders(config="0_template",
+                                                           custom_code="0_template")
+        @test ModelManagerStudio.studio_validate_inputs(sim, without_rules) == String[]
+
+        #! The comparison itself, which is the part with a right answer. Tested directly so a
+        #! deliberately broken ruleset does not have to be registered in the project database.
+        @test ext.orphan_ruleset_problems(Set(["tumor"]), Set(["tumor"])) == String[]
+        @test ext.orphan_ruleset_problems(Set{String}(), Set(["tumor"])) == String[]
+
+        one = ext.orphan_ruleset_problems(Set(["ghost"]), Set(["tumor", "healthy"]))
+        @test length(one) == 1
+        @test occursin("A behavior ruleset names", one[1])
+        @test occursin("ghost", one[1])
+        #! The message has to say what the config DOES declare, or the user cannot tell a typo
+        #! from a genuinely missing cell type.
+        @test occursin("healthy, tumor", one[1])
+
+        many = ext.orphan_ruleset_problems(Set(["ghost", "wraith"]), Set(["tumor"]))
+        @test length(many) == 1
+        @test occursin("2 behavior rulesets name", many[1])
+        @test occursin("ghost, wraith", many[1])
+
+        #! A config declaring no cell types at all still produces a readable sentence.
+        @test occursin("none", ext.orphan_ruleset_problems(Set(["ghost"]), Set{String}())[1])
     end
 
     @testset "No-folder sentinel is shared with QML" begin

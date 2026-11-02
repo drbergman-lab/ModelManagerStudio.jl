@@ -420,14 +420,27 @@ ApplicationWindow {
 
                     // Button to create inputs
                     ActionButton {
+                        id: createInputsButton
+
                         Layout.alignment: Qt.AlignCenter
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 40
                         text: "Create Inputs"
                         font.pixelSize: mainWindow.fontSizeOfLevel[2]
+                        // Julia commits nothing when the backend objects, so the dialog is
+                        // asked before anything downstream is told the inputs exist.
                         onClicked: {
-                            // Set input folders in Julia
-                            Julia.set_input_folders();
+                            let problems = Julia.set_input_folders();
+                            if (problems.length > 0) {
+                                inputsValidationDialog.problems = problems;
+                                inputsValidationDialog.open();
+                                return ;
+                            }
+                            inputsCreated();
+                        }
+
+                        // Everything that may only happen once the inputs exist.
+                        function inputsCreated() {
                             // Update the display to show current selections
                             requiredLocationsDisplay.updateFolderDisplay();
                             optionalLocationsDisplay.updateFolderDisplay();
@@ -444,6 +457,55 @@ ApplicationWindow {
                                 runSimulationButton.disabledText = "Running...";
                             }
                         }
+
+                        Dialog {
+                            id: inputsValidationDialog
+
+                            property var problems: []
+
+                            anchors.centerIn: Overlay.overlay
+                            width: Math.min(560, mainWindow.width - 80)
+                            modal: true
+                            title: "These inputs may not fit together"
+                            standardButtons: Dialog.Ok | Dialog.Cancel
+                            closePolicy: Popup.CloseOnEscape
+                            // Cancel is the default: the selection is only a guess until the
+                            // user says otherwise, and nothing has been created yet.
+                            onAccepted: {
+                                Julia.commit_input_folders();
+                                createInputsButton.inputsCreated();
+                            }
+
+                            contentItem: ColumnLayout {
+                                spacing: 10
+
+                                Repeater {
+                                    model: inputsValidationDialog.problems
+
+                                    delegate: Text {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        wrapMode: Text.Wrap
+                                        color: syscolors.text
+                                        font.pixelSize: mainWindow.fontSizeOfLevel[3]
+                                    }
+
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    text: "Create the inputs anyway, or cancel and change the selection."
+                                    wrapMode: Text.Wrap
+                                    color: mainWindow.unusedTextColor
+                                    font.pixelSize: mainWindow.fontSizeOfLevel[4]
+                                    font.italic: true
+                                }
+
+                            }
+
+                        }
+
                     }
 
                     // Current inputs display

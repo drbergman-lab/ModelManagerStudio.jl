@@ -111,3 +111,46 @@ function base_element(location::Symbol, xml_path::Vector{<:AbstractString})
         nothing
     end
 end
+
+"""
+    with_base_document(f, inputs::InputFolders, location::Symbol)
+
+Call `f` on `location`'s base document in `inputs`, then free it; `nothing` if there is none.
+
+For reading an *uncommitted* selection, which the cache cannot hold: the cache is keyed to the
+folders currently in use, and a candidate is by definition not those. The document is parsed and
+freed around the call so a validation pass cannot leak one, which is the failure mode this file
+exists to prevent.
+"""
+function with_base_document(f, inputs::MM.InputFolders, location::Symbol)
+    location in MM.projectLocations().all || return nothing
+    input_folder = try
+        inputs[location]
+    catch
+        return nothing
+    end
+    isempty(input_folder.folder) && return nothing
+
+    path = try
+        MM.prepareBaseFile(input_folder)
+    catch e
+        model_manager_studio_debug("Could not prepare the base file for $(location): $(sprint(showerror, e))")
+        return nothing
+    end
+    (isnothing(path) || !isfile(path)) && return nothing
+
+    doc = try
+        parse_file(path)
+    catch e
+        model_manager_studio_debug("Could not read the base file for $(location): $(sprint(showerror, e))")
+        return nothing
+    end
+    try
+        return f(doc)
+    finally
+        try
+            free(doc)
+        catch
+        end
+    end
+end

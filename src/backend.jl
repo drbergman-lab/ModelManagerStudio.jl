@@ -6,7 +6,7 @@
 #! Studio through the functions below, dispatched on `ModelManager.AbstractSimulator`.
 #!
 #! Each has a working generic default, so a backend that implements none of them still drives
-#! the GUI. PhysiCell overrides all four in `ext/StudioPhysiCellModelManagerExt.jl`.
+#! the GUI. PhysiCell overrides five of them in `ext/StudioPhysiCellModelManagerExt.jl`.
 #!
 #! The parameter browser's *structure* is deliberately NOT part of this seam: it reads the
 #! location's base document directly, which works for any backend whose inputs are XML, so
@@ -128,3 +128,23 @@ function studio_project_is_open()
     isnothing(MM.mm_globals_ref[]) && return false
     return MM.isInitialized()
 end
+
+"""
+    studio_validate_inputs(sim::ModelManager.AbstractSimulator, inputs::ModelManager.InputFolders)
+
+Problems with this combination of input folders, one plain-language sentence each, or `String[]`
+when there is nothing to say.
+
+Called before the selection is committed. Each string is shown to the user, who decides whether
+to go ahead, so these are observations and never refusals: a backend that wants to say two
+things should return two strings rather than pick one.
+
+The generic default finds nothing. A folder combination is only incoherent with respect to what
+the files mean, and ModelManager's own layer is deliberately indifferent to that. PhysiCell is
+not: a ruleset naming a cell definition the config does not declare is a model that will run and
+quietly ignore those rules.
+
+`inputs` is a candidate that has not been committed, so read documents from it with
+[`with_base_document`](@ref) rather than from the GUI's current selection.
+"""
+studio_validate_inputs(::MM.AbstractSimulator, ::MM.InputFolders) = String[]
