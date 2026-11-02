@@ -72,6 +72,10 @@ ApplicationWindow {
     title: "ModelManagerStudio"
     width: 800
     height: 600
+    // Below this the location grids reflow into something unreadable, and the run bar starts
+    // eating the panel above it. The Inputs tab scrolls past this point rather than clipping.
+    minimumWidth: 560
+    minimumHeight: 360
     visible: true
 
     // Add keyboard shortcut for Command+W to close the window
@@ -169,10 +173,21 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 color: mainWindow.pageBackground
 
-                ColumnLayout {
-                    spacing: 10 // Reduced spacing for more compact vertical layout
-                    anchors.centerIn: parent
+                // The tab's content has a fixed minimum height -- two location grids, a
+                // button and the inputs panel -- so below a certain window height it has to
+                // scroll. Without this it was clipped by the run bar, and "Current Inputs"
+                // was the part that went.
+                ScrollView {
+                    id: inputsScrollView
+
                     anchors.fill: parent
+                    contentWidth: availableWidth // vertical scrolling only
+                    clip: true
+
+                ColumnLayout {
+                    // Anchoring a ScrollView's content item is an error; bind the width instead.
+                    width: inputsScrollView.availableWidth
+                    spacing: 10 // Reduced spacing for more compact vertical layout
 
                     Component {
                         id: locationComponent
@@ -596,6 +611,7 @@ ApplicationWindow {
 
                 }
 
+                }
             }
 
             // Variations tab
