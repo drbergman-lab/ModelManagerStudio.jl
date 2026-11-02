@@ -7,6 +7,7 @@ authors = ["Daniel Bergman <danielrbergman@gmail.com> and contributors"]
 Compat = "34da2185-b29b-5c13-b0c7-acf172513d20"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+FFTA = "b86e33f2-c0db-4aa1-a6e0-ab43e668529e"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 LightXML = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
 ModelManager = "2cc58058-5792-4be5-9801-0e92bd3a2373"
@@ -22,6 +23,14 @@ StudioPhysiCellModelManagerExt = "PhysiCellModelManager"
 Compat = "4.16.0"
 Dates = "1"
 Distributions = "0.25.120"
+# Not used by Studio, and listed in [deps] only because Pkg ignores a [compat] bound on a
+# package that is not. FFTA arrives through ModelManager -> GlobalSensitivity -> KernelDensity;
+# a newer one defines a `plan_rfft` that is ambiguous with AbstractFFTs', so GlobalSensitivity
+# fails to precompile and every CI job dies before a test runs. Manifest.toml is gitignored, so
+# CI resolves fresh and hits this where a local checkout does not. Drop both entries once the
+# ambiguity is fixed upstream. Pinned exactly: 0.3.2 is where the ambiguous method appears, and
+# a caret bound ("0.3.1") admits it.
+FFTA = "=0.3.1"
 InteractiveUtils = "1"
 LightXML = "0.9.1"
 ModelManager = "0.12"
