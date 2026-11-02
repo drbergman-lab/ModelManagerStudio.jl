@@ -25,11 +25,10 @@ Dates = "1"
 Distributions = "0.25.120"
 # Not used by Studio, and listed in [deps] only because Pkg ignores a [compat] bound on a
 # package that is not. FFTA arrives through ModelManager -> GlobalSensitivity -> KernelDensity;
-# a newer one defines a `plan_rfft` that is ambiguous with AbstractFFTs', so GlobalSensitivity
+# 0.3.2 defines a `plan_rfft` that is ambiguous with FFTW's, so GlobalSensitivity
 # fails to precompile and every CI job dies before a test runs. Manifest.toml is gitignored, so
 # CI resolves fresh and hits this where a local checkout does not. Drop both entries once the
-# ambiguity is fixed upstream. Pinned exactly: 0.3.2 is where the ambiguous method appears, and
-# a caret bound ("0.3.1") admits it.
+# ambiguity is fixed upstream. Pinned exactly, because a caret bound ("0.3.1") admits 0.3.2.
 FFTA = "=0.3.1"
 InteractiveUtils = "1"
 LightXML = "0.9.1"
