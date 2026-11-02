@@ -168,7 +168,8 @@ ComboBox to the right of this one, so the chain would churn as the user types.
   `"<tag> (ambiguous)"`, which can never resolve. It must not be selectable.
 - **Unselected or unknown location.** Yields `String[]`, never `nothing` and never a throw —
   `prepareBaseFile` asserts from inside the simulator's dependencies for an unselected folder.
-- **Attribute values containing `/`** would break the `columnName` round trip, which joins on `/`.
+- **Attribute values containing `/`** break the `columnName` round trip, which joins on `/`. They
+  remain browsable; parameter search skips them with a warning rather than offering a dead hit.
 
 ## Feature: Parameter search — **implemented**
 
@@ -206,9 +207,14 @@ existing `create_variation` path, so Fixed Constraint 2 needs nothing new.
   same order, so anything it cannot resolve is never indexed. This covers ambiguous siblings
   (`"<tag> (ambiguous)"` matches no tag) without ever reading the marker back out of a token,
   which would drop a cell definition a modeller happened to name `tumor (ambiguous)`.
-- **`::` in an attribute value** (a `Wnt::bcat` substrate) is not indexed: `retrieveElement`
-  tests for `::` *before* splitting on `:` and routes those to `getChildByChildContent`, which
-  reads a child's content rather than an attribute, so the chain would not resolve.
+- **A name carrying `:` or `/`** is skipped, and the skipped names are named in a warning. Those
+  two characters are the only ones the path machinery cannot carry — `MM.XMLPath` asserts on a
+  four-part token, and `columnName` joins on `/` so the round trip silently returns a different
+  path. Measured: `+`, `.`, `(`, `)`, `%`, `&`, `#`, `*`, quotes and Greek all round-trip, so the
+  rule is `[:/]` and not a conservative allowlist — `interactions` ships a cell definition called
+  `CD8+ T cell`, which an allowlist would make unsearchable. The warning matters because the
+  parameter is still in the dropdowns: silently skipping it would show up only as a search that
+  never finds it.
 - **Empty query** returns no results and a count of zero, rather than every parameter.
 - **A stale row** — the folders changed since the list was drawn — returns `String[]`. Both
   staleness routes clear the hits: the explicit `invalidate_base_documents!`, and

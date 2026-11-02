@@ -70,19 +70,22 @@ function leaf_index(location::Symbol)
     end
 
     entries = LeafEntry[]
-    _collect_leaves!(entries, location, root(doc), String[])
+    unsearchable = Set{String}()
+    _collect_leaves!(entries, location, root(doc), String[], unsearchable)
+    _warn_unsearchable(location, unsearchable)
     LEAF_INDEXES.entries[location] = entries
     LEAF_INDEXES.folders[location] = folder
     return entries
 end
 
 """
-    _collect_leaves!(entries, location, e, chain)
+    _collect_leaves!(entries, location, e, chain, unsearchable)
 
-Depth-first walk appending a [`LeafEntry`](@ref) for every leaf below `e`.
+Depth-first walk appending a [`LeafEntry`](@ref) for every leaf below `e`, collecting into
+`unsearchable` the names whose subtrees had to be skipped.
 """
 function _collect_leaves!(entries::Vector{LeafEntry}, location::Symbol, e::XMLElement,
-                          chain::Vector{String})
+                          chain::Vector{String}, unsearchable::Set{String})
     next_tokens = get_next_xml_path_elements(e, ID_ATTRIBUTES)
     if isempty(next_tokens)
         isempty(chain) || push!(entries, LeafEntry(location, copy(chain), search_text(chain)))
@@ -90,6 +93,11 @@ function _collect_leaves!(entries::Vector{LeafEntry}, location::Symbol, e::XMLEl
     end
 
     for token in next_tokens
+        instance = token_name(token)
+        if !isempty(instance) && occursin(UNSEARCHABLE_NAME_CHARS, instance)
+            push!(unsearchable, instance)
+            continue
+        end
         #! `_child_for_token` resolves exactly what `retrieveElement` will, so a token it
         #! cannot follow is one the browser could never be driven to -- an ambiguous token
         #! among them, whose `"<tag> (ambiguous)"` spelling matches no tag. Skipping the whole
@@ -97,7 +105,7 @@ function _collect_leaves!(entries::Vector{LeafEntry}, location::Symbol, e::XMLEl
         child = _child_for_token(e, token)
         isnothing(child) && continue
         push!(chain, token)
-        _collect_leaves!(entries, location, child, chain)
+        _collect_leaves!(entries, location, child, chain, unsearchable)
         pop!(chain)
     end
     return nothing
@@ -108,14 +116,11 @@ end
 
 The child of `e` that `token` names, or `nothing`.
 
-Follows the same element `MM.retrieveElement` will, by making the same two decisions in the same
-order: `"::"` first, then a `limit=3` split on `":"`. A token carrying `"::"` is not followed at
-all — `retrieveElement` routes those to `getChildByChildContent`, which reads a *child's content*
-rather than an attribute, so an attribute value containing `"::"` (a `Wnt::bcat` substrate) names
-an element here that the resolved path would not find.
+Splits with `limit=3` to match `MM.retrieveElement`, so the index follows the same element the
+resolved path will. It needs no `"::"` branch of its own: a name carrying a colon is rejected by
+[`UNSEARCHABLE_NAME_CHARS`](@ref) before the walk ever gets here.
 """
 function _child_for_token(e::XMLElement, token::AbstractString)
-    contains(token, "::") && return nothing
     parts = split(token, ':'; limit=3)
     length(parts) < 3 && return find_element(e, String(token))
     tag, attr, value = parts
@@ -124,6 +129,34 @@ function _child_for_token(e::XMLElement, token::AbstractString)
             return ce
         end
     end
+    return nothing
+end
+
+#! The only two characters a name cannot carry through the path machinery, measured against
+#! `MM.XMLPath` and `MM.columnName`: ":" makes the token four parts and `XMLPath` asserts on it,
+#! and "/" is what `columnName` joins on, so the round trip silently returns a different path.
+#! Everything else a modeller actually writes survives -- "+", ".", "%", "&", quotes, Greek --
+#! and `interactions` ships a cell definition called "CD8+ T cell", so a stricter rule than this
+#! would make a sample project's own cell types unsearchable.
+const UNSEARCHABLE_NAME_CHARS = r"[:/]"
+
+"""
+    _warn_unsearchable(location, names)
+
+Say which names were left out of `location`'s index, once per build.
+
+Skipping them silently is the worse failure: the parameter is in the dropdowns, so the only
+signal would be that searching for it never finds it.
+"""
+function _warn_unsearchable(location::Symbol, names::Set{String})
+    isempty(names) && return nothing
+    listed = join(sort!(collect(names)), ", ")
+    model_manager_studio_warn("""
+    Cannot search $(length(names)) name(s) in $(location): $(listed)
+
+    A name carrying ":" or "/" cannot be written as a parameter path -- ModelManager splits a \
+    path element on ":" and joins the path on "/". These are still reachable by walking the \
+    dropdowns; they just will not turn up in a search.""")
     return nothing
 end
 

@@ -374,13 +374,21 @@ createProject()
         set_content(new_child(amb, "same"), "1")
         set_content(new_child(amb, "same"), "2")
 
-        #! `retrieveElement` tests for "::" BEFORE splitting on ":", and routes such a path
-        #! element to `getChildByChildContent`, which reads a child's content rather than an
-        #! attribute. An attribute value carrying "::" therefore names an element the index
-        #! could follow but the resolved path could not.
-        dc = new_child(r, "double_colon")
-        set_attribute(dc, "name", "Wnt::bcat")
-        set_content(new_child(dc, "rate"), "1")
+        #! A name carrying ":" or "/" cannot be written as a parameter path at all: `XMLPath`
+        #! asserts on a four-part token, and `columnName` joins on "/". Both are skipped and
+        #! reported rather than indexed as parameters no search could reach.
+        for (tag, nm) in (("double_colon", "Wnt::bcat"), ("colon", "a:b"), ("slash", "a/b"))
+            bad = new_child(r, tag)
+            set_attribute(bad, "name", nm)
+            set_content(new_child(bad, "rate"), "1")
+        end
+        #! Everything else a modeller writes survives. `interactions` ships "CD8+ T cell", so a
+        #! stricter rule would make a sample project's own cell types unsearchable.
+        for nm in ("CD8+ T cell", "M0 macrophage (resting)", "IL-2 α", "50% confluent")
+            ok = new_child(r, "fine")
+            set_attribute(ok, "name", nm)
+            set_content(new_child(ok, "rate"), "1")
+        end
         #! " (ambiguous)" is the walker's marker for same-tag siblings no attribute tells
         #! apart, but it is also something a modeller may legally name a cell type. The marker
         #! must not be recovered from text that came out of the model file.
@@ -389,18 +397,50 @@ createProject()
         set_content(new_child(named, "size"), "1")
 
         entries = ModelManagerStudio.LeafEntry[]
-        ModelManagerStudio._collect_leaves!(entries, :config, root(doc), String[])
+        skipped = Set{String}()
+        ModelManagerStudio._collect_leaves!(entries, :config, root(doc), String[], skipped)
         chains = [e.chain for e in entries]
+        @test skipped == Set(["Wnt::bcat", "a:b", "a/b"])
 
         @test ["scalar"] in chains
         @test ["group", "item:name:x"] in chains
         @test ["group", "item:name:y"] in chains
         @test !any(c -> "ambiguous_parent" in c, chains)
-        @test !any(c -> any(t -> contains(t, "::"), c), chains)
+        @test !any(c -> any(t -> contains(ModelManagerStudio.token_name(t), ":"), c), chains)
+        @test !any(c -> any(t -> contains(ModelManagerStudio.token_name(t), "/"), c), chains)
         @test ["named:name:tumor (ambiguous)", "size"] in chains
+        for nm in ("CD8+ T cell", "M0 macrophage (resting)", "IL-2 α", "50% confluent")
+            @test ["fine:name:$(nm)", "rate"] in chains
+            #! Not just indexed -- the chain has to survive the round trip MM puts it through.
+            path = ["fine:name:$(nm)", "rate"]
+            @test MM.columnNameToXMLPath(MM.columnName(MM.XMLPath(path))) == path
+        end
         @test all(e -> e.location === :config, entries)
         #! Every indexed chain must resolve, or a hit would drive the browser nowhere.
         @test all(c -> !isnothing(MM.retrieveElement(doc, c; required=false)), chains)
+
+        free(doc)
+    end
+
+    @testset "Unsearchable names are reported, not silently dropped" begin
+        #! The parameter is still in the dropdowns, so a silent skip would show up only as a
+        #! search that never finds it.
+        doc = XMLDocument()
+        r = create_root(doc, "root")
+        bad = new_child(r, "cd")
+        set_attribute(bad, "name", "Wnt::bcat")
+        set_content(new_child(bad, "rate"), "1")
+
+        entries = ModelManagerStudio.LeafEntry[]
+        unsearchable = Set{String}()
+        ModelManagerStudio._collect_leaves!(entries, :config, root(doc), String[], unsearchable)
+        @test isempty(entries)
+        @test unsearchable == Set(["Wnt::bcat"])
+
+        @test_logs (:warn, r"Wnt::bcat") ModelManagerStudio._warn_unsearchable(:config, unsearchable)
+        @test_logs (:warn, r"config") ModelManagerStudio._warn_unsearchable(:config, unsearchable)
+        #! Nothing to say when every name is fine.
+        @test_logs ModelManagerStudio._warn_unsearchable(:config, Set{String}())
 
         free(doc)
     end
@@ -917,36 +957,3 @@ createProject()
     end
 
 end
-
-#__PROBE_START__
-let S = ModelManagerStudio
-    function raw_order(query)
-        words = S.search_words(query)
-        scored = Tuple{Int,S.LeafEntry}[]
-        for location in S.searchable_locations()
-            for entry in S.leaf_index(location)
-                rank = S.match_rank(entry, words)
-                isnothing(rank) || push!(scored, (rank, entry))
-            end
-        end
-        return scored
-    end
-    for query in ["default speed", "max time", "speed", "default migration", "default bias"]
-        raw = raw_order(query)
-        sorted = S.search_parameters(query)
-        println("PROBE === query: ", repr(query), "  (", length(raw), " matches)")
-        println("PROBE -- RAW (sort! deleted), first 5 --")
-        for (rank, e) in first(raw, 5)
-            println("PROBE    rank=", rank, "  ", e.location, ": ", join(e.chain, "/"))
-        end
-        println("PROBE -- SORTED (current code), first 5 --")
-        for (i, l) in enumerate(first(sorted, 5))
-            println("PROBE    rank=", S.match_rank(S.last_search_hits[i], S.search_words(query)), "  ", l)
-        end
-        if !isempty(raw)
-            fr = raw[1][1]; best = minimum(t -> t[1], raw)
-            println("PROBE -- raw-first-rank=", fr, " best-rank=", best, fr > best ? "   <<<< INVERSION" : "")
-        end
-    end
-end
-#__PROBE_END__
